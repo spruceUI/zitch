@@ -10,8 +10,11 @@ LOG="/mnt/SDCARD/Saves/spruce/zitch-$PLATFORM.log"
 # A game can't share the screen with zitch, so zitch writes what to run here
 # and exits; it runs below, then zitch comes back.
 HANDOFF=/tmp/zitch_next.sh
-BIN_DIR="$APP_DIR/zitch"
-[ "$PLATFORM_ARCHITECTURE" = "armhf" ] && BIN_DIR="$APP_DIR/zitch32"
+# Each 32-bit device has a build of its own; the rest share the aarch64 one.
+case "$PLATFORM" in
+    "A30") BIN_DIR="$APP_DIR/zitch-a30" ;;
+    *) BIN_DIR="$APP_DIR/zitch" ;;
+esac
 
 # zitch's environment only: the games it hands over run with spruce's.
 zitch_env() {
@@ -35,10 +38,11 @@ zitch_env() {
             export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"
             ;;
         "A30")
-            # The firmware's SDL2 turns the portrait panel into a 640x480 screen.
-            export LD_LIBRARY_PATH="/usr/miyoo/lib:$LD_LIBRARY_PATH"
+                        export LD_LIBRARY_PATH="/usr/miyoo/lib:$LD_LIBRARY_PATH"
             export SDL_VIDEODRIVER=mali
             export SDL_JOYSTICKDRIVER=a30
+            # The panel is mounted on its side; zitch turns its frame as PyUI does.
+            export ZITCH_SCREEN_ROTATION="$DISPLAY_ROTATION"
             ;;
         "Zero28" | "Zero40" | "XU20")
             LD_LIBRARY_PATH="$(magicx_pyui_sdl_dir):$LD_LIBRARY_PATH"

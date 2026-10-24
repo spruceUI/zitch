@@ -1,4 +1,4 @@
-name: Build zitch (armhf)
+name: Build zitch (A30)
 
 on:
   workflow_dispatch:
@@ -31,11 +31,11 @@ jobs:
           path: |
             cache-cargo
             target
-          key: cargo-armhf-${{ hashFiles('Cargo.lock', 'spruce/Dockerfile.armhf') }}-${{ github.sha }}
-          restore-keys: cargo-armhf-${{ hashFiles('Cargo.lock', 'spruce/Dockerfile.armhf') }}-
+          key: cargo-a30-${{ hashFiles('Cargo.lock', 'spruce/Dockerfile.a30') }}-${{ github.sha }}
+          restore-keys: cargo-a30-${{ hashFiles('Cargo.lock', 'spruce/Dockerfile.a30') }}-
 
       - name: Build Docker image
-        run: docker build -f spruce/Dockerfile.armhf -t zitch-armhf-builder spruce
+        run: docker build -f spruce/Dockerfile.a30 -t zitch-a30-builder spruce
 
       - name: Build zitch
         run: |
@@ -47,12 +47,12 @@ jobs:
             -v ${{ github.workspace }}:/src \
             -v ${{ github.workspace }}/output:/output \
             -v ${{ github.workspace }}/cache-cargo:/cache \
-            zitch-armhf-builder
+            zitch-a30-builder
 
       - name: Upload App folder
-        run: sudo tar -czf zitch-armhf.tar.gz -C output App
+        run: sudo tar -czf zitch-a30.tar.gz -C output App
 
       - uses: actions/upload-artifact@v4
         with:
-          name: zitch-armhf
-          path: zitch-armhf.tar.gz
+          name: zitch-a30
+          path: zitch-a30.tar.gz

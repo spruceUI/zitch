@@ -10,11 +10,11 @@ jobs:
   universal:
     uses: ./.github/workflows/build-universal.yml
 
-  armhf:
-    uses: ./.github/workflows/build-armhf.yml
+  a30:
+    uses: ./.github/workflows/build-a30.yml
 
   package:
-    needs: [universal, armhf]
+    needs: [universal, a30]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -34,14 +34,14 @@ jobs:
               --notes "zitch binaries built from ${{ github.ref_name }}" \
             || true
 
-      # The 64-bit App folder with the 32-bit build in App/zitch/zitch32.
+      # The 64-bit App folder with the A30's build in App/zitch/zitch-a30.
       - name: Upload zitch-spruce.zip
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir out
           tar -xzf zitch-aarch64/zitch-aarch64.tar.gz -C out
-          tar -xzf zitch-armhf/zitch-armhf.tar.gz -C out
+          tar -xzf zitch-a30/zitch-a30.tar.gz -C out
           cd out
           zip -qr ../zitch-spruce.zip App
           cd ..

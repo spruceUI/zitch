@@ -246,8 +246,10 @@ pub fn run(
             stats.input += u32::from(!sdl_events.is_empty());
         }
         let (w, _) = sdl_window.size();
-        let (pw, ph) = sdl_window.drawable_size();
-        let native_ppp = if w > 0 { pw as f32 / w as f32 } else { 1.0 };
+        let (dw, dh) = sdl_window.drawable_size();
+        let native_ppp = if w > 0 { dw as f32 / w as f32 } else { 1.0 };
+        // A turned screen is laid out upright; gl_fix turns the frame.
+        let (pw, ph) = if gl_fix::quarter_turn() { (dh, dw) } else { (dw, dh) };
         let ppp = ctx.pixels_per_point();
         // SDL reports the pointer in window units; egui wants points.
         let to_points = native_ppp / ppp;
@@ -688,19 +690,27 @@ impl Pads {
 }
 
 /// What egui asks of GLES2 that the A30's Mali-400 driver lacks, fixed on
-/// the way to the driver. zitch's only GL user is egui.
+/// the way to the driver, and the frame turned for a panel mounted on its side
+/// (ZITCH_SCREEN_ROTATION, degrees clockwise as spruce's DISPLAY_ROTATION).
+/// zitch's only GL user is egui.
 mod gl_fix {
     use std::ffi::{CStr, CString, c_char, c_int, c_void};
     use std::sync::OnceLock;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
     type ShaderSource = unsafe extern "C" fn(u32, c_int, *const *const c_char, *const c_int);
     type BufferData = unsafe extern "C" fn(u32, isize, *const c_void, u32);
     type DrawElements = unsafe extern "C" fn(u32, c_int, u32, *const c_void);
+    type Rect = unsafe extern "C" fn(c_int, c_int, c_int, c_int);
 
     static SHADER_SOURCE: OnceLock<ShaderSource> = OnceLock::new();
     static BUFFER_DATA: OnceLock<BufferData> = OnceLock::new();
     static DRAW_ELEMENTS: OnceLock<DrawElements> = OnceLock::new();
+    static VIEWPORT: OnceLock<Rect> = OnceLock::new();
+    static SCISSOR: OnceLock<Rect> = OnceLock::new();
+    /// The upright frame's size, from egui's full-screen viewport.
+    static FRAME_W: AtomicI32 = AtomicI32::new(0);
+    static FRAME_H: AtomicI32 = AtomicI32::new(0);
     /// The element buffer last filled holds u16 indices egui sent as u32.
     static SHORT_INDICES: AtomicBool = AtomicBool::new(false);
 
@@ -713,6 +723,21 @@ mod gl_fix {
     /// compile; `#if defined(X)` means the same where X is defined.
     const PRECISION_TEST: &str =
         "defined(GL_FRAGMENT_PRECISION_HIGH) && GL_FRAGMENT_PRECISION_HIGH == 1";
+
+    fn rotation() -> u32 {
+        static ROTATION: OnceLock<u32> = OnceLock::new();
+        *ROTATION.get_or_init(|| {
+            match std::env::var("ZITCH_SCREEN_ROTATION").ok().and_then(|r| r.parse().ok()) {
+                Some(degrees @ (90 | 180 | 270)) => degrees,
+                _ => 0,
+            }
+        })
+    }
+
+    /// Whether the frame is laid out with the screen's width and height swapped.
+    pub fn quarter_turn() -> bool {
+        matches!(rotation(), 90 | 270)
+    }
 
     pub fn wrap(name: &str, real: *const c_void) -> *const c_void {
         if real.is_null() {
@@ -734,6 +759,16 @@ mod gl_fix {
                     let real: DrawElements = std::mem::transmute(real);
                     let _ = DRAW_ELEMENTS.set(real);
                     draw_elements as *const c_void
+                }
+                "glViewport" if rotation() != 0 => {
+                    let real: Rect = std::mem::transmute(real);
+                    let _ = VIEWPORT.set(real);
+                    viewport as *const c_void
+                }
+                "glScissor" if rotation() != 0 => {
+                    let real: Rect = std::mem::transmute(real);
+                    let _ = SCISSOR.set(real);
+                    scissor as *const c_void
                 }
                 _ => real,
             }
@@ -763,8 +798,16 @@ mod gl_fix {
             };
             source.extend_from_slice(bytes);
         }
-        let fixed = String::from_utf8_lossy(&source)
+        let mut fixed = String::from_utf8_lossy(&source)
             .replace(PRECISION_TEST, "defined(GL_FRAGMENT_PRECISION_HIGH)");
+        if let Some(turned) = turned_position()
+            && fixed.contains("gl_Position")
+        {
+            fixed = fixed.replacen("void main()", "void egui_main()", 1)
+                + "\nvoid main() {\n    egui_main();\n    gl_Position = "
+                + turned
+                + ";\n}\n";
+        }
         let fixed = CString::new(fixed).unwrap_or_default();
         let pointer = fixed.as_ptr();
         unsafe { real(shader, 1, &pointer, std::ptr::null()) };
@@ -805,5 +848,47 @@ mod gl_fix {
         } else {
             unsafe { real(mode, count, kind, offset) };
         }
+    }
+
+    /// The vertex position turned clockwise by the rotation, in clip space.
+    fn turned_position() -> Option<&'static str> {
+        match rotation() {
+            90 => Some("vec4(gl_Position.y, -gl_Position.x, gl_Position.zw)"),
+            180 => Some("vec4(-gl_Position.xy, gl_Position.zw)"),
+            270 => Some("vec4(-gl_Position.y, gl_Position.x, gl_Position.zw)"),
+            _ => None,
+        }
+    }
+
+    /// A rectangle of the upright frame, in GL's bottom-left pixels, as it
+    /// lands in the turned framebuffer.
+    fn turn_rect(x: c_int, y: c_int, w: c_int, h: c_int) -> (c_int, c_int, c_int, c_int) {
+        let (fw, fh) = (FRAME_W.load(Ordering::Relaxed), FRAME_H.load(Ordering::Relaxed));
+        match rotation() {
+            90 => (y, fw - (x + w), h, w),
+            180 => (fw - (x + w), fh - (y + h), w, h),
+            270 => (fh - (y + h), x, h, w),
+            _ => (x, y, w, h),
+        }
+    }
+
+    unsafe extern "C" fn viewport(x: c_int, y: c_int, w: c_int, h: c_int) {
+        let Some(real) = VIEWPORT.get() else {
+            return;
+        };
+        if x == 0 && y == 0 {
+            FRAME_W.store(w, Ordering::Relaxed);
+            FRAME_H.store(h, Ordering::Relaxed);
+        }
+        let (x, y, w, h) = turn_rect(x, y, w, h);
+        unsafe { real(x, y, w, h) };
+    }
+
+    unsafe extern "C" fn scissor(x: c_int, y: c_int, w: c_int, h: c_int) {
+        let Some(real) = SCISSOR.get() else {
+            return;
+        };
+        let (x, y, w, h) = turn_rect(x, y, w, h);
+        unsafe { real(x, y, w, h) };
     }
 }

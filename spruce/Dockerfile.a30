@@ -33,13 +33,13 @@ RUN SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot && \
     ln -sf libresolv-2.23.so libresolv.so.2
 ENV PATH=/opt/a30/bin:$PATH
 
-COPY toolchain-armhf.cmake /opt/toolchain-armhf.cmake
+COPY toolchain-a30.cmake /opt/toolchain-a30.cmake
 
 # Only linked to; the device loads its own libSDL2-2.0.so.0.
 ARG SDL_VERSION=2.28.5
 RUN curl -sSfL https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL2-${SDL_VERSION}.tar.gz | tar xz -C /tmp && \
     cmake -S /tmp/SDL2-${SDL_VERSION} -B /tmp/sdl-build -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain-armhf.cmake -DCMAKE_INSTALL_PREFIX=/opt/sdl2 \
+        -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain-a30.cmake -DCMAKE_INSTALL_PREFIX=/opt/sdl2 \
         -DSDL_STATIC=OFF -DSDL_TEST=OFF -DSDL_X11=OFF -DSDL_WAYLAND=OFF -DSDL_KMSDRM=OFF \
         -DSDL_ALSA=OFF -DSDL_PULSEAUDIO=OFF -DSDL_PIPEWIRE=OFF -DSDL_JACK=OFF -DSDL_SNDIO=OFF \
         -DSDL_LIBUDEV=OFF -DSDL_DBUS=OFF -DSDL_IBUS=OFF && \
@@ -56,8 +56,8 @@ ENV RUSTUP_HOME=/usr/local/rustup PATH=/usr/local/cargo/bin:$PATH
 RUN curl -sSf https://sh.rustup.rs | CARGO_HOME=/usr/local/cargo sh -s -- -y \
         --profile minimal --default-toolchain stable --target armv7-unknown-linux-gnueabihf
 
-COPY build-armhf.sh /build-armhf.sh
-RUN chmod +x /build-armhf.sh
+COPY build-a30.sh /build-a30.sh
+RUN chmod +x /build-a30.sh
 
 WORKDIR /src
-ENTRYPOINT ["/build-armhf.sh"]
+ENTRYPOINT ["/build-a30.sh"]

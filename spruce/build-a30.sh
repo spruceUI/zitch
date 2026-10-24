@@ -22,7 +22,7 @@ STAGE=/tmp/stage
 rm -rf "$STAGE" /tmp/butler /tmp/libc7zip /tmp/7z
 mkdir -p "$STAGE"
 
-echo "=== Building zitch ${ZITCH_VERSION} for armhf ==="
+echo "=== Building zitch ${ZITCH_VERSION} for the A30 ==="
 git config --global --add safe.directory /src
 cargo build --release --target "$TARGET" --no-default-features --features sdl-host
 cp "target/$TARGET/release/zitch" "$STAGE/"
@@ -42,7 +42,7 @@ echo "=== Building libc7zip ==="
 git clone -q https://github.com/itchio/libc7zip.git /tmp/libc7zip
 git -C /tmp/libc7zip checkout -q "$LIBC7ZIP_REV"
 cmake -S /tmp/libc7zip -B /tmp/libc7zip/build -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain-armhf.cmake \
+    -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain-a30.cmake \
     -DCMAKE_SHARED_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
 cmake --build /tmp/libc7zip/build -j"$(nproc)" --target c7zip
 cp /tmp/libc7zip/build/libc7zip.so "$STAGE/"
@@ -68,9 +68,9 @@ for f in "$STAGE"/*; do
 done
 
 mkdir -p "$OUTPUT_DIR/App/zitch"
-rm -rf "$OUTPUT_DIR/App/zitch/zitch32"
-cp -a "$STAGE" "$OUTPUT_DIR/App/zitch/zitch32"
+rm -rf "$OUTPUT_DIR/App/zitch/zitch-a30"
+cp -a "$STAGE" "$OUTPUT_DIR/App/zitch/zitch-a30"
 # zitch's own and butler's sit in zitch/licenses beside the 64-bit build.
-mkdir -p "$OUTPUT_DIR/App/zitch/zitch32/licenses"
-cp /tmp/7z/DOC/License.txt "$OUTPUT_DIR/App/zitch/zitch32/licenses/7zip.LICENSE"
+mkdir -p "$OUTPUT_DIR/App/zitch/zitch-a30/licenses"
+cp /tmp/7z/DOC/License.txt "$OUTPUT_DIR/App/zitch/zitch-a30/licenses/7zip.LICENSE"
 echo "=== Done ==="
