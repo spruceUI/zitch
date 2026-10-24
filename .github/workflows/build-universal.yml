@@ -56,6 +56,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd output
-          sudo tar czf ../zitch-aarch64.tar.gz .
+          sudo zip -qr ../zitch-spruce.zip App
           cd ..
-          gh release upload "beta-${{ github.ref_name }}" zitch-aarch64.tar.gz --clobber
+          gh release upload "beta-${{ github.ref_name }}" zitch-spruce.zip --clobber

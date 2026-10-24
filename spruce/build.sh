@@ -30,7 +30,10 @@ for f in "$STAGE/butler" "$STAGE/love" "$STAGE"/libs/*; do
     echo "$(basename "$f"): ${need:-static}"
 done
 
-rm -rf "$OUTPUT_DIR/zitch"
-mkdir -p "$OUTPUT_DIR"
-cp -a "$STAGE" "$OUTPUT_DIR/zitch"
+# The App folder as it goes on the card.
+APP="$OUTPUT_DIR/App/zitch"
+rm -rf "$OUTPUT_DIR/App"
+mkdir -p "$APP"
+cp spruce/app/config.json spruce/app/launch.sh spruce/app/zitch.png "$APP/"
+cp -a "$STAGE" "$APP/zitch"
 echo "=== Done ==="
