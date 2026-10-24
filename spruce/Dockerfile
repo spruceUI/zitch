@@ -5,7 +5,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
-    cmake \
     gcc-aarch64-linux-gnu \
     g++-aarch64-linux-gnu \
     pkg-config \
@@ -15,7 +14,11 @@ RUN apt-get update && \
     unzip \
     zip \
     python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# gl4es needs CMake 3.19+; focal's is 3.16.
+RUN pip3 install --no-cache-dir cmake==3.31.6
 
 # Focal's SDL2 is 2.0.10, older than the sdl2 crate links against. This one
 # is only linked to; devices load their own libSDL2-2.0.so.0.
