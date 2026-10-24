@@ -169,7 +169,12 @@ pub fn run(
     }
     let gl = unsafe {
         egui_glow::glow::Context::from_loader_function(|name| {
-            video.gl_get_proc_address(name) as *const _
+            let proc = video.gl_get_proc_address(name) as *const std::ffi::c_void;
+            if name == "glShaderSource" {
+                shader_fix::wrap(proc)
+            } else {
+                proc
+            }
         })
     };
     let mut painter = egui_glow::Painter::new(Arc::new(gl), "", None, false)
@@ -684,5 +689,59 @@ impl Pads {
             moves.extend(self.triggers.update(self.left_trigger, self.right_trigger));
         }
         moves
+    }
+}
+
+/// egui's shaders pick their precision with `#if defined(X) && X == 1`. The
+/// Mali-400's preprocessor evaluates `X == 1` even when X is undefined and
+/// fails the compile, so that test is cut to `#if defined(X)`, which means
+/// the same where X is defined.
+mod shader_fix {
+    use std::ffi::{CStr, CString, c_char, c_int, c_void};
+    use std::sync::OnceLock;
+
+    type ShaderSource = unsafe extern "C" fn(u32, c_int, *const *const c_char, *const c_int);
+
+    static REAL: OnceLock<ShaderSource> = OnceLock::new();
+
+    const TEST: &str = "defined(GL_FRAGMENT_PRECISION_HIGH) && GL_FRAGMENT_PRECISION_HIGH == 1";
+
+    pub fn wrap(real: *const c_void) -> *const c_void {
+        if real.is_null() {
+            return real;
+        }
+        let real = unsafe { std::mem::transmute::<*const c_void, ShaderSource>(real) };
+        let _ = REAL.set(real);
+        shader_source as *const c_void
+    }
+
+    unsafe extern "C" fn shader_source(
+        shader: u32,
+        count: c_int,
+        strings: *const *const c_char,
+        lengths: *const c_int,
+    ) {
+        let Some(real) = REAL.get() else {
+            return;
+        };
+        let mut source = Vec::new();
+        for i in 0..count.max(0) as usize {
+            let (string, length) = unsafe {
+                let string = *strings.add(i);
+                let length = if lengths.is_null() { -1 } else { *lengths.add(i) };
+                (string, length)
+            };
+            let bytes = if length < 0 {
+                unsafe { CStr::from_ptr(string) }.to_bytes()
+            } else {
+                unsafe { std::slice::from_raw_parts(string.cast::<u8>(), length as usize) }
+            };
+            source.extend_from_slice(bytes);
+        }
+        let fixed =
+            String::from_utf8_lossy(&source).replace(TEST, "defined(GL_FRAGMENT_PRECISION_HIGH)");
+        let fixed = CString::new(fixed).unwrap_or_default();
+        let pointer = fixed.as_ptr();
+        unsafe { real(shader, 1, &pointer, std::ptr::null()) };
     }
 }
