@@ -413,6 +413,13 @@ pub fn run(
     Ok(())
 }
 
+/// Whether to drop keyboard events: where the buttons also arrive as keys
+/// (the A30's), each press would act twice (ZITCH_IGNORE_KEYBOARD=1).
+fn ignore_keyboard() -> bool {
+    static IGNORE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IGNORE.get_or_init(|| std::env::var_os("ZITCH_IGNORE_KEYBOARD").is_some_and(|v| v == "1"))
+}
+
 /// Keyboard and mouse state between frames, as egui events.
 #[derive(Default)]
 struct Input {
@@ -423,6 +430,11 @@ struct Input {
 
 impl Input {
     fn translate(&mut self, event: Event, to_points: f32) {
+        let keyboard =
+            matches!(event, Event::KeyDown { .. } | Event::KeyUp { .. } | Event::TextInput { .. });
+        if keyboard && ignore_keyboard() {
+            return;
+        }
         match event {
             Event::KeyDown {
                 keycode: Some(keycode),

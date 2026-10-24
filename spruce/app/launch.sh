@@ -38,9 +38,13 @@ zitch_env() {
             export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"
             ;;
         "A30")
-                        export LD_LIBRARY_PATH="/usr/miyoo/lib:$LD_LIBRARY_PATH"
+            export LD_LIBRARY_PATH="/usr/miyoo/lib:$LD_LIBRARY_PATH"
             export SDL_VIDEODRIVER=mali
-            export SDL_JOYSTICKDRIVER=a30
+            # The firmware's joypad spoofs an Xbox 360 pad, so SDL would apply
+            # its Xbox mapping; this is MIYOO Pad1's own, as ScummVM uses it.
+            export SDL_GAMECONTROLLERCONFIG="030000005e0400008e0200005e040000,MIYOO Pad1,a:b0,b:b1,x:b3,y:b2,leftshoulder:b4,rightshoulder:b5,back:b6,start:b7,guide:b8,leftstick:b9,rightstick:b10,leftx:a0,lefty:a1,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,platform:Linux,"
+            # The buttons are keys too; read through the pad, each press would act twice.
+            export ZITCH_IGNORE_KEYBOARD=1
             # The panel is mounted on its side; zitch turns its frame as PyUI does.
             export ZITCH_SCREEN_ROTATION="$DISPLAY_ROTATION"
             ;;
