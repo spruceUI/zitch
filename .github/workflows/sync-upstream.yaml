@@ -1,10 +1,8 @@
 name: Sync master with upstream
 
-# master is a 1:1 mirror of itchio/zitch for branching upstream PRs from.
-# This only ever fast-forwards it; a push that is not a fast-forward fails,
-# which means upstream rewrote history and someone should look.
-# SYNC_TOKEN is a token with the workflow scope: upstream edits its own
-# workflows, and the default token may not push those.
+# master carries itchio/zitch's files minus its .github/workflows, one commit
+# per sync. Upstream's workflows are left out because the default token may
+# not push workflow changes, and spruce builds with its own.
 
 on:
   schedule:
@@ -22,13 +20,20 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
-          token: ${{ secrets.SYNC_TOKEN || github.token }}
 
-      - name: Fast-forward master to upstream
+      - name: Copy upstream into master
         run: |
           set -e
           git remote add upstream https://github.com/itchio/zitch.git
           git fetch upstream master
-          echo "master:   $(git rev-parse --short origin/master)"
-          echo "upstream: $(git rev-parse --short upstream/master)"
-          git push origin upstream/master:master
+          UP=$(git rev-parse --short upstream/master)
+          git rm -rq --cached -- . ':!.github/workflows'
+          git checkout upstream/master -- . ':!.github/workflows'
+          if git diff --cached --quiet; then
+            echo "master already matches upstream $UP"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "Sync upstream $UP"
+          git push origin HEAD:master
