@@ -102,9 +102,18 @@ const fn extra(
 
 pub(super) const OPENBOR: &str = "openbor";
 
-/// The extra system a file's extension says it is for.
+/// Extensions of dash's systems that dash only takes after reading a
+/// header, and that are theirs alone on spruce. Without one, butler finds
+/// no installer for a ROM uploaded bare.
+const DASH_EXTS: [(&str, &str); 3] = [("nds", "nds"), ("cso", "psp"), ("smd", "md")];
+
+/// The system a file's extension says it is for, past dash's own list.
 pub(super) fn id_for_ext(ext: &str) -> Option<&'static str> {
-    EXTRAS.iter().find(|e| e.exts.contains(&ext)).map(|e| e.id)
+    DASH_EXTS
+        .iter()
+        .find(|(e, _)| *e == ext)
+        .map(|(_, id)| *id)
+        .or_else(|| EXTRAS.iter().find(|e| e.exts.contains(&ext)).map(|e| e.id))
 }
 
 /// The extra systems spruce shows that itch.io has a tag for, as
