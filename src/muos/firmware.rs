@@ -133,6 +133,9 @@ pub(super) fn systems() -> &'static HashMap<String, System> {
     }
     static SYSTEMS: OnceLock<HashMap<String, System>> = OnceLock::new();
     SYSTEMS.get_or_init(|| {
+        if is_spruce() {
+            return spruce::systems();
+        }
         let ids = ROM_IDS.iter().chain(&[PICO8, TIC80]);
         if manifests_here() {
             let read = |name: &str| {
@@ -330,10 +333,11 @@ pub(super) fn id_for_file(path: &Path) -> Option<&'static str> {
     })
 }
 
-/// Whether this is a muOS device: its launch script is present.
+/// Whether this is a handheld firmware: muOS, its launch script is
+/// present, or spruce.
 pub fn available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| Path::new(LAUNCH_SCRIPT).exists())
+    *AVAILABLE.get_or_init(|| Path::new(LAUNCH_SCRIPT).exists() || is_spruce())
 }
 
 /// What the frontend writes before running the launch script: the

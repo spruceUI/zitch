@@ -45,11 +45,15 @@ pub fn for_report() -> String {
 
 fn fields() -> Map<String, Value> {
     let mut info = Map::new();
-    let on_muos = muos::available();
-    info.insert(
-        "platform".into(),
-        json!(if on_muos { "muos" } else { "desktop" }),
-    );
+    let on_muos = muos::available() && !muos::is_spruce();
+    let platform = if muos::is_spruce() {
+        "spruce"
+    } else if on_muos {
+        "muos"
+    } else {
+        "desktop"
+    };
+    info.insert("platform".into(), json!(platform));
     info.insert("os".into(), json!(std::env::consts::OS));
     info.insert("arch".into(), json!(std::env::consts::ARCH));
     if on_muos {

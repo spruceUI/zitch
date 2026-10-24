@@ -350,6 +350,10 @@ pub fn run(
                 }
             }
         }
+        // spruce runs the game after we exit; see muos::spruce.
+        if crate::muos::exit_requested() {
+            close = true;
+        }
         for command in platform_output.commands {
             if let egui::OutputCommand::OpenUrl(url) = command
                 && let Err(error) = open::that_detached(&url.url)

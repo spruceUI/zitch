@@ -56,7 +56,11 @@ pub fn launch(
             run.strategy = Some(Strategy::Retroarch);
             run.core = Some(system.core.clone());
             run.launch_target = Some(format!("rom:{} {file}", system.id));
-            launch_rom(name, system, path, env)
+            if is_spruce() {
+                spruce::launch(content, args, env)
+            } else {
+                launch_rom(name, system, path, env)
+            }
         }
         Content::Love { path } => {
             run.strategy = Some(Strategy::Love);
@@ -64,7 +68,11 @@ pub fn launch(
                 Some(version) => format!("love:{version} {file}"),
                 None => format!("love {file}"),
             });
-            launch_love(path, args, env, run)
+            if is_spruce() {
+                spruce::launch(content, args, env)
+            } else {
+                launch_love(path, args, env, run)
+            }
         }
     };
     *RUNNING.lock().unwrap_or_else(|p| p.into_inner()) = None;
@@ -135,6 +143,9 @@ pub(super) fn spawn_group(command: &mut Command) -> std::io::Result<std::process
 }
 
 pub(super) fn set_foreground(process: &str) {
+    if is_spruce() {
+        return;
+    }
     if let Err(error) = std::fs::write(FOREGROUND_PROCESS, process) {
         log::warn!("setting {FOREGROUND_PROCESS}: {error}");
     }

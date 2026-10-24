@@ -1974,6 +1974,7 @@ fn refresh_caves(client: &Client, emit: &Emitter) {
     match all_caves(client) {
         Ok(caves) => {
             log::info!("{} installed games", caves.len());
+            crate::muos::sync_roms(&caves);
             emit.send(Event::Caves(caves));
         }
         Err(error) => log::warn!("refreshing caves: {error:#}"),

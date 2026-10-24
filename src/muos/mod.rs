@@ -16,11 +16,13 @@ mod appimage;
 mod compat;
 mod firmware;
 mod running;
+mod spruce;
 
 pub use appimage::*;
 pub use compat::*;
 pub use firmware::*;
 pub use running::*;
+pub use spruce::{exit_requested, is_spruce, sync_roms};
 
 /// A stand-in firmware for tests: what the device has, set per thread so
 /// a test decides instead of the machine it runs on.
