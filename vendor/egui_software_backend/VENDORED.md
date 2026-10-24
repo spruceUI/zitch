@@ -7,3 +7,5 @@ Changed from upstream:
   their dependencies, the examples and the workspace removed.
 - src/winit.rs, src/test_render.rs and constify/tests removed, and their
   module declarations dropped from src/lib.rs.
+- src/lib.rs set_textures: egui 0.36's TexturesDelta.set holds a list of
+  ImageDeltas per texture; the loop goes over each.

@@ -870,41 +870,44 @@ impl EguiSoftwareRender {
     fn set_textures(&mut self, textures_delta: &egui::TexturesDelta) {
         #[cfg(feature = "raster_stats")]
         let start = std::time::Instant::now();
-        for (id, delta) in &textures_delta.set {
-            if delta.options.magnification != delta.options.minification {
-                // Would need helper lanes to impl?
-                #[cfg(feature = "log")]
-                log::warn!(
-                    "TextureOptions magnification and minification not matching is unsupported."
-                );
-            }
-            let pixels = match &delta.image {
-                egui::ImageData::Color(image) => {
-                    assert_eq!(image.width() * image.height(), image.pixels.len());
-                    Cow::Borrowed(&image.pixels)
+        // egui 0.36 sends each texture's changes as a list.
+        for (id, deltas) in &textures_delta.set {
+            for delta in deltas {
+                if delta.options.magnification != delta.options.minification {
+                    // Would need helper lanes to impl?
+                    #[cfg(feature = "log")]
+                    log::warn!(
+                        "TextureOptions magnification and minification not matching is unsupported."
+                    );
                 }
-            };
-            let size = delta.image.size();
-            if let Some(pos) = delta.pos {
-                if let Some(texture) = self.textures.get_mut(id) {
-                    for y in 0..size[1] {
-                        for x in 0..size[0] {
-                            let src_pos = x + y * size[0];
-                            let dest_pos = (x + pos[0]) + (y + pos[1]) * texture.width;
-                            texture.data[dest_pos] = match self.output_field_order {
-                                ColorFieldOrder::Rgba => pixels[src_pos].to_array(),
-                                ColorFieldOrder::Bgra => {
-                                    swizzle_rgba_bgra(pixels[src_pos].to_array())
-                                }
-                            };
+                let pixels = match &delta.image {
+                    egui::ImageData::Color(image) => {
+                        assert_eq!(image.width() * image.height(), image.pixels.len());
+                        Cow::Borrowed(&image.pixels)
+                    }
+                };
+                let size = delta.image.size();
+                if let Some(pos) = delta.pos {
+                    if let Some(texture) = self.textures.get_mut(id) {
+                        for y in 0..size[1] {
+                            for x in 0..size[0] {
+                                let src_pos = x + y * size[0];
+                                let dest_pos = (x + pos[0]) + (y + pos[1]) * texture.width;
+                                texture.data[dest_pos] = match self.output_field_order {
+                                    ColorFieldOrder::Rgba => pixels[src_pos].to_array(),
+                                    ColorFieldOrder::Bgra => {
+                                        swizzle_rgba_bgra(pixels[src_pos].to_array())
+                                    }
+                                };
+                            }
                         }
                     }
-                }
-            } else {
-                let new_texture =
-                    EguiTexture::new(self.output_field_order, delta.options, size, &pixels);
+                } else {
+                    let new_texture =
+                        EguiTexture::new(self.output_field_order, delta.options, size, &pixels);
 
-                self.textures.insert(*id, new_texture);
+                    self.textures.insert(*id, new_texture);
+                }
             }
         }
         #[cfg(feature = "raster_stats")]

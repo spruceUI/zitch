@@ -150,7 +150,7 @@ pub fn run(
     if window.fullscreen {
         builder.fullscreen_desktop();
     }
-    let mut screen = Screen::open(&video, builder)?;
+    let mut surface = Screen::open(&video, builder)?;
     video.text_input().start();
 
     let ctx = egui::Context::default();
@@ -226,8 +226,8 @@ pub fn run(
             stats.passes += 1;
             stats.input += u32::from(!sdl_events.is_empty());
         }
-        let (w, _) = screen.window().size();
-        let (dw, dh) = screen.window().drawable_size();
+        let (w, _) = surface.window().size();
+        let (dw, dh) = surface.window().drawable_size();
         let native_ppp = if w > 0 { dw as f32 / w as f32 } else { 1.0 };
         // A turned screen is laid out upright; gl_fix turns the frame.
         let (pw, ph) = if gl_fix::quarter_turn() { (dh, dw) } else { (dw, dh) };
@@ -296,7 +296,7 @@ pub fn run(
             viewport_id: egui::ViewportId::ROOT,
             viewports: std::iter::once((egui::ViewportId::ROOT, viewport)).collect(),
             screen_rect: Some(screen),
-            max_texture_side: Some(screen.max_texture_side()),
+            max_texture_side: Some(surface.max_texture_side()),
             time: Some(started.elapsed().as_secs_f64()),
             events: std::mem::take(&mut input.events),
             focused: true,
@@ -366,23 +366,23 @@ pub fn run(
             // Nothing is drawn, but egui's textures move on (the font
             // atlas grows, covers arrive) and the painter has to follow or
             // the next visible frame draws with stale ones.
-            screen.follow_textures(&textures_delta);
+            surface.follow_textures(&textures_delta);
             continue;
         }
         let primitives = ctx.tessellate(shapes, pixels_per_point);
         if std::mem::take(&mut scrub) {
             for _ in 0..2 {
-                screen.clear([pw, ph], SCRUB_COLOR);
-                screen.present();
+                surface.clear([pw, ph], SCRUB_COLOR);
+                surface.present();
             }
         }
-        screen.clear([pw, ph], [0.0, 0.0, 0.0, 1.0]);
-        let painted = screen.paint([pw, ph], pixels_per_point, &primitives, &mut textures_delta);
+        surface.clear([pw, ph], [0.0, 0.0, 0.0, 1.0]);
+        let painted = surface.paint([pw, ph], pixels_per_point, &primitives, &mut textures_delta);
         if let Err(error) = painted {
             log::warn!("{error:#}");
         }
         for data in shots.drain(..) {
-            let image = screen.read_screen_rgba([pw, ph]);
+            let image = surface.read_screen_rgba([pw, ph]);
             input.events.push(egui::Event::Screenshot {
                 viewport_id: egui::ViewportId::ROOT,
                 user_data: data,
@@ -390,7 +390,7 @@ pub fn run(
             });
             wait = Duration::ZERO;
         }
-        screen.present();
+        surface.present();
         if let Some(stats) = &mut stats {
             stats.drawn += 1;
         }
@@ -399,7 +399,7 @@ pub fn run(
         }
     }
     app.on_close();
-    screen.destroy();
+    surface.destroy();
     Ok(())
 }
 
