@@ -191,6 +191,9 @@ pub enum Action {
     /// The toolbar's rating pill: ask which of the player's ratings to show.
     RatingFilterMenu,
     SetRatingFilter(RatingFilter),
+    /// Which playable type the Search tab shows; none is every type.
+    SearchTypeMenu,
+    SetSearchType(Option<String>),
     /// Focus a row on the Settings page; the pointer is already there.
     FocusSettingsRow(usize),
     SetTab(Tab),

@@ -755,8 +755,15 @@ impl Session<'_> {
                     Some(key) => key.clone(),
                     None => crate::report::saved_api_key(&config.dbpath, profile_id)?,
                 };
-                let games = crate::itch_search::search(&config.api_url, &key, &query, 1)?;
-                let games = games.into_iter().map(Arc::new).collect();
+                // A few pages, since the device's filters leave out many.
+                let mut games = Vec::new();
+                for page in 1..=SEARCH_PAGES {
+                    let found = crate::itch_search::search(&config.api_url, &key, &query, page)?;
+                    if found.is_empty() {
+                        break;
+                    }
+                    games.extend(found.into_iter().map(Arc::new));
+                }
                 emit.send(Event::SearchResults { query, games });
                 Ok(())
             },
@@ -2348,6 +2355,9 @@ fn sign_in(client: &Client, config: &Config, emit: &Emitter) -> Result<Option<Pr
         .map(Some)
         .ok_or_else(|| anyhow!("login returned no profile"))
 }
+
+/// How many pages of itch.io's results one search fetches.
+const SEARCH_PAGES: u32 = 3;
 
 /// The OAuth client registered for the device sign-in.
 const LOGIN_CLIENT_ID: &str = "d59031fc193811bb3e6af0f8eeeb2c18";

@@ -773,6 +773,22 @@ impl App {
                         action: Action::Search,
                     }],
                 );
+                push(playable.0, playable.1);
+                let type_label = self
+                    .search
+                    .type_filter
+                    .as_ref()
+                    .and_then(|id| {
+                        crate::playable::playable_types().iter().find(|t| t.id == *id)
+                    })
+                    .map_or("All types", |t| t.label.as_str());
+                push(
+                    ui::ToolbarControl::Filters(vec![(
+                        type_label,
+                        self.search.type_filter.is_some(),
+                    )]),
+                    vec![ToolbarStop::new("Type", Action::SearchTypeMenu)],
+                );
             }
         }
         (controls, stops)
@@ -1338,6 +1354,14 @@ impl App {
                 }
             }
             Action::RatingFilterMenu => self.open_rating_filter(),
+            Action::SearchTypeMenu => self.open_search_type(),
+            Action::SetSearchType(wanted) => {
+                if self.search.type_filter != wanted {
+                    self.search.type_filter = wanted;
+                    self.rebuild_search_rows();
+                    self.search.rows.follow = true;
+                }
+            }
             Action::SetRatingFilter(filter) => {
                 if self.rating_filter != filter {
                     self.rating_filter = filter;
@@ -1757,7 +1781,67 @@ impl App {
         self.save_settings();
         self.request_collection_filtered(None);
         self.rebuild_rows();
+        self.rebuild_search_rows();
         self.follow_rows();
+    }
+
+    /// Lays out the search results that pass "Playable here" and the
+    /// chosen type.
+    fn rebuild_search_rows(&mut self) {
+        let shown = self
+            .search
+            .found_ids()
+            .iter()
+            .copied()
+            .filter(|id| self.catalog.get(id).is_some_and(|g| self.search_passes(g)))
+            .collect();
+        self.search.show(shown);
+    }
+
+    fn search_passes(&self, game: &Game) -> bool {
+        if !self.playable_passes(game) {
+            return false;
+        }
+        let Some(wanted) = &self.search.type_filter else {
+            return true;
+        };
+        // `love` stands for every LÖVE version, as on the types page.
+        game.scanned_platforms.as_deref().is_some_and(|scanned| {
+            scanned
+                .iter()
+                .any(|p| p == wanted || (wanted == "love" && p.starts_with("love:")))
+        })
+    }
+
+    /// Asks which playable type the Search tab shows.
+    fn open_search_type(&mut self) {
+        let types = crate::playable::playable_types();
+        let mut choices = vec!["All types".to_string()];
+        choices.extend(types.iter().map(|t| t.label.clone()));
+        let focus = self
+            .search
+            .type_filter
+            .as_ref()
+            .and_then(|id| types.iter().position(|t| t.id == *id))
+            .map_or(0, |index| index + 1);
+        let prompt = Prompt {
+            id: 0,
+            origin: PromptOrigin::Options,
+            title: "Show".to_string(),
+            body: String::new(),
+            choices,
+            focus,
+            primary: None,
+            stacked: true,
+            details: Vec::new(),
+            progress: None,
+        };
+        if let Some(open) = self.prompt.replace(prompt) {
+            self.prompt_queue.push_front(open);
+        }
+        self.prompt_options = std::iter::once(Action::SetSearchType(None))
+            .chain(types.iter().map(|t| Action::SetSearchType(Some(t.id.clone()))))
+            .collect();
     }
 
     /// How many of the device's types "Playable here" includes.
@@ -2519,7 +2603,9 @@ impl App {
                 }
                 Event::SearchResults { query, games } => {
                     self.catalog_add(Source::Search, &games);
-                    self.search.found(&query, &games);
+                    if self.search.found(&query, &games) {
+                        self.rebuild_search_rows();
+                    }
                 }
                 Event::SearchFailed { query, error } => self.search.failed(&query, error),
                 Event::UpdateCheckFailed(error) => {

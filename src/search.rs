@@ -22,6 +22,8 @@ pub struct Search {
     /// The games found, by id, in itch.io's order.
     pub results: Loadable<Vec<i64>>,
     pub rows: ui::Rows,
+    /// The one playable type to show, from `playable::playable_types`.
+    pub type_filter: Option<String>,
 }
 
 /// What a press came to while the keyboard is open.
@@ -84,11 +86,12 @@ impl Search {
         Some(query)
     }
 
-    /// The games found for `query`. An answer to an earlier search is
-    /// dropped.
-    pub fn found(&mut self, query: &str, games: &[Arc<Game>]) {
+    /// The games found for `query`; the caller lays out the ones its
+    /// filters pass with [`Search::show`]. An answer to an earlier search
+    /// is dropped, and false.
+    pub fn found(&mut self, query: &str, games: &[Arc<Game>]) -> bool {
         if query != self.searched {
-            return;
+            return false;
         }
         let mut seen = std::collections::HashSet::new();
         let ids: Vec<i64> = games
@@ -96,19 +99,29 @@ impl Search {
             .map(|game| game.id)
             .filter(|id| seen.insert(*id))
             .collect();
-        let sections = if ids.is_empty() {
+        self.results = Loadable::Loaded(ids);
+        true
+    }
+
+    /// Every game found, before filters.
+    pub fn found_ids(&self) -> &[i64] {
+        self.results.get().map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// Lays out the results that passed the filters.
+    pub fn show(&mut self, shown: Vec<i64>) {
+        let sections = if shown.is_empty() {
             Vec::new()
         } else {
             vec![ui::Section {
-                title: format!("Results for “{query}” · {}", ids.len()),
-                games: ids.clone(),
+                title: format!("Results for “{}” · {}", self.searched, shown.len()),
+                games: shown,
                 note: None,
                 more: false,
                 collection: None,
             }]
         };
         self.rows.set_sections(sections);
-        self.results = Loadable::Loaded(ids);
     }
 
     pub fn failed(&mut self, query: &str, error: String) {
@@ -120,6 +133,11 @@ impl Search {
     /// What the tab says in place of results.
     pub fn placeholder(&self) -> String {
         match &self.results {
+            Loadable::Loaded(ids) if !ids.is_empty() => format!(
+                "None of the {} games found for “{}” run here with these filters",
+                ids.len(),
+                self.searched
+            ),
             Loadable::Loaded(_) => format!("No games found for “{}”", self.searched),
             Loadable::Failed(error) => error.clone(),
             Loadable::NotLoaded | Loadable::Loading => "Search itch.io for games".to_string(),

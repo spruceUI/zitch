@@ -76,7 +76,10 @@ pub fn device_platforms() -> &'static [String] {
     static PLATFORMS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     PLATFORMS.get_or_init(|| {
         let mut platforms = crate::muos::runtimes();
-        platforms.push("linux-arm64-handheld".to_string());
+        // On spruce a Linux build cannot have the screen yet; see muos::spruce.
+        if !crate::muos::is_spruce() {
+            platforms.push("linux-arm64-handheld".to_string());
+        }
         platforms
     })
 }
