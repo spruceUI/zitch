@@ -146,11 +146,15 @@ pub fn run(
         .map_err(|e| anyhow!("SDL controllers: {e}"))?;
     log::info!("SDL video driver: {}", video.current_video_driver());
     {
-        let attr = video.gl_attr();
-        attr.set_context_profile(sdl2::video::GLProfile::GLES);
-        attr.set_context_version(2, 0);
-        attr.set_double_buffer(true);
-        attr.set_depth_size(0);
+        use sdl2::sys::{SDL_GLattr, SDL_GLprofile};
+        gl_attribute(
+            SDL_GLattr::SDL_GL_CONTEXT_PROFILE_MASK,
+            SDL_GLprofile::SDL_GL_CONTEXT_PROFILE_ES as i32,
+        );
+        gl_attribute(SDL_GLattr::SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+        gl_attribute(SDL_GLattr::SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        gl_attribute(SDL_GLattr::SDL_GL_DOUBLEBUFFER, 1);
+        gl_attribute(SDL_GLattr::SDL_GL_DEPTH_SIZE, 0);
     }
     let mut builder = video.window("zitch", window.size.0 as u32, window.size.1 as u32);
     builder.opengl().position_centered();
@@ -433,6 +437,14 @@ pub fn run(
     app.on_close();
     painter.destroy();
     Ok(())
+}
+
+/// The sdl2 crate panics when SDL refuses a GL attribute. The Miyoo Mini's
+/// SDL2 refuses them all and makes its GLES2 context regardless.
+fn gl_attribute(attr: sdl2::sys::SDL_GLattr, value: i32) {
+    if unsafe { sdl2::sys::SDL_GL_SetAttribute(attr, value) } != 0 {
+        log::warn!("SDL refused GL attribute {}: {}", attr as u32, sdl2::get_error());
+    }
 }
 
 /// A handheld button that its SDL sends as a key.
