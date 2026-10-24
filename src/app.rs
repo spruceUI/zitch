@@ -21,6 +21,7 @@ use crate::playable::{CollectionFilter, known_playable_here};
 use crate::qr::QrCode;
 use crate::report::{Rating, Report, Reports, Run, Runs, SavedReport, SavedRun};
 use crate::sample;
+use crate::search::{Search, Typed};
 use crate::self_update::{self, SelfUpdate};
 use crate::settings::Settings;
 use crate::ui;
@@ -144,6 +145,8 @@ pub struct App {
     focus_search: bool,
     /// Take keyboard focus out of the search box on the next frame.
     blur_search: bool,
+    /// The Search tab.
+    search: Search,
     page: Page,
     /// The sign-in code, while there is nothing to sign in with.
     login: Option<LoginView>,
@@ -394,6 +397,7 @@ impl App {
             query: String::new(),
             focus_search: false,
             blur_search: false,
+            search: Search::default(),
             page: Page::Library,
             login: None,
             qr: None,
@@ -527,6 +531,7 @@ impl App {
     fn follow_rows(&mut self) {
         self.rows.follow = true;
         self.collection_rows.follow = true;
+        self.search.rows.follow = true;
     }
 
     /// Rebuilds the rows of both carousel tabs.
@@ -551,7 +556,7 @@ impl App {
             return Some((stop.hint, press));
         }
         match self.tab {
-            Tab::Library | Tab::Collections => {
+            Tab::Library | Tab::Collections | Tab::Search => {
                 let id = self
                     .active_rows_ref()
                     .and_then(|rows| rows.focused_game())
@@ -629,6 +634,7 @@ impl App {
             Tab::Library => Some(&mut self.rows),
             Tab::Collections => Some(&mut self.collection_rows),
             Tab::Downloads => None,
+            Tab::Search => Some(&mut self.search.rows),
         }
     }
 
@@ -637,6 +643,7 @@ impl App {
             Tab::Library => Some(&self.rows),
             Tab::Collections => Some(&self.collection_rows),
             Tab::Downloads => None,
+            Tab::Search => Some(&self.search.rows),
         }
     }
 
@@ -650,6 +657,7 @@ impl App {
             Tab::Library => no_tiles(&self.rows),
             Tab::Collections => no_tiles(&self.collection_rows),
             Tab::Downloads => self.download_rows().is_empty(),
+            Tab::Search => no_tiles(&self.search.rows),
         }
     }
 
@@ -749,6 +757,22 @@ impl App {
                         vec![ToolbarStop::new("Clear all", Action::ClearFinished)],
                     );
                 }
+            }
+            Tab::Search => {
+                let offline = !self.online;
+                push(
+                    ui::ToolbarControl::Button {
+                        label: "Search itch.io",
+                        busy: false,
+                        disabled: offline,
+                    },
+                    vec![ToolbarStop {
+                        hint: "Search",
+                        busy: false,
+                        offline,
+                        action: Action::Search,
+                    }],
+                );
             }
         }
         (controls, stops)
@@ -999,6 +1023,7 @@ impl App {
             Tab::Library => self.rows.row == 0,
             Tab::Collections => self.collection_rows.row == 0,
             Tab::Downloads => self.downloads_row_in(&self.download_rows()).0 == 0,
+            Tab::Search => self.search.rows.row == 0,
         };
         let landing = step_toolbar_focus(
             self.toolbar_focus_in(stops, rows_empty),
@@ -1163,6 +1188,18 @@ impl App {
             self.apply_in_login(action);
             return;
         }
+        let action = if self.page.is_library() && self.tab == Tab::Search {
+            match self.search.type_key(action) {
+                Typed::Taken => return,
+                Typed::Run => {
+                    self.run_search();
+                    return;
+                }
+                Typed::Pass(action) => action,
+            }
+        } else {
+            action
+        };
         match action {
             Action::MoveFocus(direction) => match self.page {
                 Page::Library => self.move_focus_library(direction),
@@ -1213,6 +1250,8 @@ impl App {
             Action::FocusToolbar(index) => {
                 self.toolbar_focus[tab_slot(self.tab)] = Some(index);
             }
+            // Only meaningful while the keyboard is open, handled above.
+            Action::FocusKey { .. } => {}
             Action::FocusButton(button) => {
                 if let Page::Game { id, .. } = self.page {
                     self.page = Page::Game {
@@ -1393,6 +1432,7 @@ impl App {
                 Page::PlayableTypes { .. } | Page::Settings { .. } => {}
             },
             Action::Search => match self.page {
+                Page::Library if self.tab == Tab::Search => self.open_search(),
                 Page::Library if self.tab == Tab::Library && !self.handheld => {
                     self.focus_search = true;
                 }
@@ -1400,6 +1440,7 @@ impl App {
                 Page::Game { .. } => self.actions.push(Action::ShowQr),
             },
             Action::Secondary => match self.page {
+                Page::Library if self.tab == Tab::Search => self.open_search(),
                 Page::Library if self.tab != Tab::Downloads => {
                     let stops = self.toolbar().1.len();
                     let rows_empty = self.rows_empty();
@@ -1445,12 +1486,20 @@ impl App {
                 }
             }
             Action::CloseScreenshot => self.viewer = None,
+            Action::SearchDone if self.tab == Tab::Search => {
+                self.blur_search = true;
+                self.run_search();
+            }
             Action::SearchDone => {
                 self.blur_search = true;
                 // Search hands control to its results, not back to the
                 // toolbar button that had focus before typing.
                 self.toolbar_focus[tab_slot(Tab::Library)] = None;
                 self.rows.follow = true;
+            }
+            Action::ClearSearch if self.tab == Tab::Search => {
+                self.blur_search = true;
+                self.search.query.clear();
             }
             Action::ClearSearch => {
                 self.blur_search = true;
@@ -2468,6 +2517,11 @@ impl App {
                     self.rebuild_installs();
                     self.notify(format!("Couldn't cancel: {error}"));
                 }
+                Event::SearchResults { query, games } => {
+                    self.catalog_add(Source::Search, &games);
+                    self.search.found(&query, &games);
+                }
+                Event::SearchFailed { query, error } => self.search.failed(&query, error),
                 Event::UpdateCheckFailed(error) => {
                     self.checking_updates = false;
                     self.notify(format!("Couldn't check for updates: {error}"));
@@ -3095,6 +3149,26 @@ impl App {
         }
     }
 
+    /// The on-screen keyboard for a controller, the search box otherwise.
+    fn open_search(&mut self) {
+        if self.handheld || self.input_mode == InputMode::Gamepad {
+            self.search.open_keyboard();
+        } else {
+            self.focus_search = true;
+        }
+    }
+
+    fn run_search(&mut self) {
+        if !self.online {
+            self.notify_offline("Search");
+            return;
+        }
+        if let Some(query) = self.search.start() {
+            self.toolbar_focus[tab_slot(Tab::Search)] = None;
+            self.backend.send(Command::Search { query });
+        }
+    }
+
     /// Drops what belonged to the profile. Installs and downloads are the
     /// database's, not the profile's, and the next session resends them.
     fn sign_out(&mut self) {
@@ -3114,6 +3188,7 @@ impl App {
         self.tab = Tab::default();
         self.toolbar_focus = [None; Tab::ALL.len()];
         self.query.clear();
+        self.search = Search::default();
         self.rows = ui::Rows::default();
         self.collection_rows = ui::Rows::default();
         self.catalog.clear();
@@ -3283,6 +3358,11 @@ impl App {
         // The tab strip already shows the bumpers, so no hint repeats them.
         match self.page {
             Page::Library => {
+                if self.tab == Tab::Search
+                    && let Some(hints) = self.search.keyboard_hints()
+                {
+                    return hints;
+                }
                 let (_, stops) = self.toolbar();
                 let rows_empty = self.rows_empty();
                 let on_toolbar = self.toolbar_focus_in(stops.len(), rows_empty).is_some();
@@ -3301,7 +3381,9 @@ impl App {
                 if let Some(label) = confirm {
                     hints.push((vec![Glyph::Confirm], label.to_string()));
                 }
-                if self.input_mode == InputMode::Gamepad && self.tab != Tab::Downloads {
+                if self.input_mode == InputMode::Gamepad
+                    && !matches!(self.tab, Tab::Downloads | Tab::Search)
+                {
                     let label = if !on_toolbar {
                         Some("Filters")
                     } else {
@@ -3319,6 +3401,12 @@ impl App {
                         hints.push((vec![Glyph::Menu], "Menu".to_string()));
                     }
                     Tab::Collections | Tab::Downloads => {
+                        hints.push((vec![Glyph::Back], "Back".to_string()));
+                    }
+                    Tab::Search => {
+                        if self.input_mode == InputMode::Gamepad && !on_toolbar {
+                            hints.push((vec![Glyph::Secondary], "Search".to_string()));
+                        }
                         hints.push((vec![Glyph::Back], "Back".to_string()));
                     }
                 }
@@ -3602,6 +3690,7 @@ impl App {
                         Tab::Library => self.owned.get().is_some(),
                         Tab::Collections => self.collections.get().is_some(),
                         Tab::Downloads => false,
+                        Tab::Search => self.search.keyboard.is_none(),
                     };
                 if toolbar_shown {
                     ui.add_space(m.frame(8.0));
@@ -3615,7 +3704,8 @@ impl App {
                         if let Some(index) = response.clicked {
                             self.actions.push(stops[index].action.clone());
                         }
-                        if self.tab != Tab::Library || self.handheld {
+                        let searching = self.tab == Tab::Search;
+                        if !matches!(self.tab, Tab::Library | Tab::Search) || self.handheld {
                             return;
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3623,8 +3713,13 @@ impl App {
                             if std::mem::take(&mut self.blur_search) {
                                 ui.memory_mut(|m| m.surrender_focus(id));
                             }
+                            let query = if searching {
+                                &mut self.search.query
+                            } else {
+                                &mut self.query
+                            };
                             let edit = ui.add(
-                                egui::TextEdit::singleline(&mut self.query)
+                                egui::TextEdit::singleline(query)
                                     .id(id)
                                     .hint_text(
                                         egui::RichText::new("Search")
@@ -3636,7 +3731,7 @@ impl App {
                             if std::mem::take(&mut self.focus_search) {
                                 edit.request_focus();
                             }
-                            if edit.changed() {
+                            if edit.changed() && !searching {
                                 self.rebuild_sections();
                             }
                         });
@@ -3749,6 +3844,41 @@ impl App {
                             }
                             if let Some(index) = response.clicked {
                                 self.actions.push(stops[index].action.clone());
+                            }
+                        }
+                        Tab::Search => {
+                            if let Some(keyboard) = &self.search.keyboard {
+                                crate::osk::draw(
+                                    ui,
+                                    &m,
+                                    keyboard,
+                                    &self.search.query,
+                                    &mut self.actions,
+                                );
+                            } else if matches!(self.search.results, Loadable::Loading) {
+                                ui::centered_spinner(ui, &m);
+                            } else if self.search.rows.sections.is_empty() {
+                                ui::placeholder(ui, &m, &self.search.placeholder());
+                            } else {
+                                ui.push_id("search", |ui| {
+                                    ui::library(
+                                        ui,
+                                        &m,
+                                        ui::LibraryView {
+                                            games: &self.catalog,
+                                            installed: &self.installed,
+                                            installs: &self.installs,
+                                            updatable: &self.updatable(),
+                                            marks: self.cover_marks.then_some(&self.marks),
+                                            covers: &self.covers,
+                                            scrollbar: self.input_mode == InputMode::Keyboard,
+                                            focused: self.toolbar_focus[tab_slot(Tab::Search)]
+                                                .is_none(),
+                                        },
+                                        &mut self.search.rows,
+                                        &mut self.actions,
+                                    );
+                                });
                             }
                         }
                     },
@@ -4143,6 +4273,7 @@ struct Filtered {
 /// profile's own view of the game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Source {
+    Search,
     Collection,
     Install,
     Owned,

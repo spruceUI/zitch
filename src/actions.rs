@@ -48,16 +48,23 @@ pub enum Tab {
     Library,
     Collections,
     Downloads,
+    Search,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 3] = [Tab::Library, Tab::Collections, Tab::Downloads];
+    pub const ALL: [Tab; 4] = [
+        Tab::Library,
+        Tab::Collections,
+        Tab::Downloads,
+        Tab::Search,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Tab::Library => "Library",
             Tab::Collections => "Collections",
             Tab::Downloads => "Downloads",
+            Tab::Search => "Search",
         }
     }
 
@@ -134,6 +141,11 @@ pub enum Action {
     },
     /// Focus a button on the tab's toolbar; the pointer is already there.
     FocusToolbar(usize),
+    /// Focus a key of the on-screen keyboard; the pointer is already there.
+    FocusKey {
+        row: usize,
+        key: usize,
+    },
     Activate,
     Back,
     Open(Page),

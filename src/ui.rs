@@ -26,8 +26,8 @@ pub const BG: Color32 = Color32::from_gray(0x15);
 const TILE_BG: Color32 = Color32::from_gray(0x1e);
 const TILE_HOVER: Color32 = Color32::from_gray(0x2a);
 pub const TEXT: Color32 = Color32::from_rgb(0xff, 0xff, 0xf0);
-const ACCENT: Color32 = Color32::from_rgb(0xfa, 0x5c, 0x5c);
-const DIM: Color32 = Color32::from_gray(0xba);
+pub const ACCENT: Color32 = Color32::from_rgb(0xfa, 0x5c, 0x5c);
+pub const DIM: Color32 = Color32::from_gray(0xba);
 /// Text on a control that cannot be used right now.
 const DISABLED: Color32 = Color32::from_gray(0x6e);
 /// Text on a button that is not the main one.
@@ -37,13 +37,13 @@ const AMBER: Color32 = Color32::from_rgb(0xff, 0xc2, 0x00);
 const ORANGE: Color32 = Color32::from_rgb(0xff, 0x8c, 0x42);
 /// The app's secondary button surface: translucent white over whatever
 /// is behind, so one style works on the page and on a row.
-const SURFACE: Color32 = Color32::from_rgba_premultiplied(0x0b, 0x0b, 0x0b, 0x0b);
-const SURFACE_HOVER: Color32 = Color32::from_rgba_premultiplied(0x17, 0x17, 0x17, 0x17);
-const BORDER: Color32 = Color32::from_rgba_premultiplied(0x1c, 0x1c, 0x1c, 0x1c);
-const BORDER_HOVER: Color32 = Color32::from_rgba_premultiplied(0x33, 0x33, 0x33, 0x33);
+pub const SURFACE: Color32 = Color32::from_rgba_premultiplied(0x0b, 0x0b, 0x0b, 0x0b);
+pub const SURFACE_HOVER: Color32 = Color32::from_rgba_premultiplied(0x17, 0x17, 0x17, 0x17);
+pub const BORDER: Color32 = Color32::from_rgba_premultiplied(0x1c, 0x1c, 0x1c, 0x1c);
+pub const BORDER_HOVER: Color32 = Color32::from_rgba_premultiplied(0x33, 0x33, 0x33, 0x33);
 const SHADOW: Color32 = Color32::from_rgb(0x1b, 0x19, 0x19);
 /// Border of the filter bar's options.
-const FILTER_BORDER: Color32 = Color32::from_rgb(0x84, 0x34, 0x42);
+pub const FILTER_BORDER: Color32 = Color32::from_rgb(0x84, 0x34, 0x42);
 
 const LATO_REGULAR: &[u8] = include_bytes!("../assets/fonts/Lato-Regular.ttf");
 const LATO_BOLD: &[u8] = include_bytes!("../assets/fonts/Lato-Bold.ttf");
@@ -79,7 +79,7 @@ pub fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-fn bold(size: f32) -> FontId {
+pub fn bold(size: f32) -> FontId {
     FontId::new(size, egui::FontFamily::Name("bold".into()))
 }
 
@@ -151,7 +151,7 @@ fn squircle(rect: Rect, radii: [f32; 4]) -> Vec<egui::Pos2> {
     points
 }
 
-fn fill_squircle(ui: &Ui, rect: Rect, radii: [f32; 4], fill: Color32, stroke: Stroke) {
+pub fn fill_squircle(ui: &Ui, rect: Rect, radii: [f32; 4], fill: Color32, stroke: Stroke) {
     ui.painter().add(egui::Shape::convex_polygon(
         squircle(rect, radii),
         fill,
@@ -216,7 +216,7 @@ fn hsl(h: f32, s: f32, l: f32) -> Color32 {
 
 /// The controller focus ring, the app's `outline: 2px solid accent;
 /// outline-offset: 2px` on keyboard focus.
-fn focus_ring(ui: &Ui, rect: Rect, radii: [f32; 4], m: &Metrics) {
+pub fn focus_ring(ui: &Ui, rect: Rect, radii: [f32; 4], m: &Metrics) {
     let gap = m.space(2.0);
     let width = m.space(2.0);
     let outer = rect.expand(gap + width / 2.0);

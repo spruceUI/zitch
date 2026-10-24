@@ -136,6 +136,10 @@ pub enum Command {
     ChangeUser,
     /// Send a compatibility report, in the background.
     Report(Box<Report>),
+    /// Search itch.io for games; answered by [`Event::SearchResults`].
+    Search {
+        query: String,
+    },
     Shutdown,
 }
 
@@ -239,6 +243,14 @@ pub enum Event {
     },
     /// Updates butler found for installed games, one per cave.
     Updates(Vec<GameUpdate>),
+    SearchResults {
+        query: String,
+        games: Vec<Arc<Game>>,
+    },
+    SearchFailed {
+        query: String,
+        error: String,
+    },
     /// A question to show until [`Event::PromptClosed`] or an answer.
     Prompt(Prompt),
     PromptClosed(u64),
@@ -672,6 +684,7 @@ impl Session<'_> {
             Command::Uninstall { cave_id, title } => self.uninstall(cave_id, title),
             Command::Launch { cave_id } => self.launch(cave_id),
             Command::Report(report) => self.report(*report),
+            Command::Search { query } => self.search(query),
             Command::QuitGame { cave_id } => {
                 self.launches.quit(&cave_id);
                 // A payload the firmware runs is our own child, not butler's.
@@ -716,6 +729,27 @@ impl Session<'_> {
                     games: page.0,
                     next_cursor: page.1,
                 });
+                Ok(())
+            },
+        );
+    }
+
+    fn search(&self, query: String) {
+        let profile_id = self.profile.id;
+        let asked = query.clone();
+        self.op(
+            "search".into(),
+            move |error| Event::SearchFailed {
+                query: asked.clone(),
+                error: if is_offline(&error) {
+                    "Search needs a connection to itch.io".to_string()
+                } else {
+                    format!("Couldn't search: {error:#}")
+                },
+            },
+            move |client, emit| {
+                let games = search_games(client, profile_id, &query)?;
+                emit.send(Event::SearchResults { query, games });
                 Ok(())
             },
         );
@@ -2692,6 +2726,17 @@ fn collection_page(
             .collect(),
         page.next_cursor.filter(|c| !c.is_empty()),
     ))
+}
+
+/// Games on itch.io matching the query.
+#[allow(deprecated)]
+fn search_games(client: &Client, profile_id: i64, query: &str) -> Result<Vec<Arc<Game>>> {
+    use crate::butlerd::types::SearchGamesParams;
+    let result = client.call(SearchGamesParams {
+        profile_id,
+        query: query.to_string(),
+    })?;
+    Ok(result.games.into_iter().map(Arc::new).collect())
 }
 
 fn all_caves(client: &Client) -> Result<Vec<Cave>> {
