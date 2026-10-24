@@ -539,6 +539,11 @@ fn key(keycode: Keycode) -> Option<egui::Key> {
     })
 }
 
+fn nintendo_buttons() -> bool {
+    static NINTENDO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *NINTENDO.get_or_init(|| std::env::var_os("ZITCH_NINTENDO_BUTTONS").is_some_and(|v| v == "1"))
+}
+
 /// Open controllers and their held state. Buttons that mean a direction
 /// repeat while held, the same as a stick.
 struct Pads {
@@ -606,6 +611,11 @@ impl Pads {
             Button::DPadDown => return self.dpad_set(0.0, -1.0),
             Button::DPadLeft => return self.dpad_set(-1.0, 0.0),
             Button::DPadRight => return self.dpad_set(1.0, 0.0),
+            // Nintendo-labelled pads (spruce sets this): the A label is
+            // SDL's B, the Y label SDL's X, and the hints name labels.
+            Button::B if nintendo_buttons() => PadButton::South,
+            Button::A if nintendo_buttons() => PadButton::East,
+            Button::X if nintendo_buttons() => PadButton::North,
             Button::A => PadButton::South,
             Button::B => PadButton::East,
             Button::Y => PadButton::North,

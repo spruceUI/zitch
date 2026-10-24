@@ -56,6 +56,8 @@ zitch_env() {
     mkdir -p "$HOME"
 
     export_sdl_gamecontroller_map positional
+    # spruce devices are labelled the Nintendo way: A right, B bottom.
+    export ZITCH_NINTENDO_BUTTONS=1
     export SSL_CERT_FILE=/mnt/SDCARD/spruce/etc/ca-certificates.crt
 }
 
