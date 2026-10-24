@@ -169,12 +169,7 @@ pub fn run(
     }
     let gl = unsafe {
         egui_glow::glow::Context::from_loader_function(|name| {
-            let proc = video.gl_get_proc_address(name) as *const std::ffi::c_void;
-            if name == "glShaderSource" {
-                shader_fix::wrap(proc)
-            } else {
-                proc
-            }
+            gl_fix::wrap(name, video.gl_get_proc_address(name) as *const std::ffi::c_void)
         })
     };
     let mut painter = egui_glow::Painter::new(Arc::new(gl), "", None, false)
@@ -692,27 +687,57 @@ impl Pads {
     }
 }
 
-/// egui's shaders pick their precision with `#if defined(X) && X == 1`. The
-/// Mali-400's preprocessor evaluates `X == 1` even when X is undefined and
-/// fails the compile, so that test is cut to `#if defined(X)`, which means
-/// the same where X is defined.
-mod shader_fix {
+/// What egui asks of GLES2 that the A30's Mali-400 driver lacks, fixed on
+/// the way to the driver. zitch's only GL user is egui.
+mod gl_fix {
     use std::ffi::{CStr, CString, c_char, c_int, c_void};
     use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     type ShaderSource = unsafe extern "C" fn(u32, c_int, *const *const c_char, *const c_int);
+    type BufferData = unsafe extern "C" fn(u32, isize, *const c_void, u32);
+    type DrawElements = unsafe extern "C" fn(u32, c_int, u32, *const c_void);
 
-    static REAL: OnceLock<ShaderSource> = OnceLock::new();
+    static SHADER_SOURCE: OnceLock<ShaderSource> = OnceLock::new();
+    static BUFFER_DATA: OnceLock<BufferData> = OnceLock::new();
+    static DRAW_ELEMENTS: OnceLock<DrawElements> = OnceLock::new();
+    /// The element buffer last filled holds u16 indices egui sent as u32.
+    static SHORT_INDICES: AtomicBool = AtomicBool::new(false);
 
-    const TEST: &str = "defined(GL_FRAGMENT_PRECISION_HIGH) && GL_FRAGMENT_PRECISION_HIGH == 1";
+    const ELEMENT_ARRAY_BUFFER: u32 = 0x8893;
+    const UNSIGNED_SHORT: u32 = 0x1403;
+    const UNSIGNED_INT: u32 = 0x1405;
 
-    pub fn wrap(real: *const c_void) -> *const c_void {
+    /// egui picks its precision with `#if defined(X) && X == 1`. The Mali-400's
+    /// preprocessor evaluates `X == 1` even when X is undefined and fails the
+    /// compile; `#if defined(X)` means the same where X is defined.
+    const PRECISION_TEST: &str =
+        "defined(GL_FRAGMENT_PRECISION_HIGH) && GL_FRAGMENT_PRECISION_HIGH == 1";
+
+    pub fn wrap(name: &str, real: *const c_void) -> *const c_void {
         if real.is_null() {
             return real;
         }
-        let real = unsafe { std::mem::transmute::<*const c_void, ShaderSource>(real) };
-        let _ = REAL.set(real);
-        shader_source as *const c_void
+        unsafe {
+            match name {
+                "glShaderSource" => {
+                    let real: ShaderSource = std::mem::transmute(real);
+                    let _ = SHADER_SOURCE.set(real);
+                    shader_source as *const c_void
+                }
+                "glBufferData" => {
+                    let real: BufferData = std::mem::transmute(real);
+                    let _ = BUFFER_DATA.set(real);
+                    buffer_data as *const c_void
+                }
+                "glDrawElements" => {
+                    let real: DrawElements = std::mem::transmute(real);
+                    let _ = DRAW_ELEMENTS.set(real);
+                    draw_elements as *const c_void
+                }
+                _ => real,
+            }
+        }
     }
 
     unsafe extern "C" fn shader_source(
@@ -721,7 +746,7 @@ mod shader_fix {
         strings: *const *const c_char,
         lengths: *const c_int,
     ) {
-        let Some(real) = REAL.get() else {
+        let Some(real) = SHADER_SOURCE.get() else {
             return;
         };
         let mut source = Vec::new();
@@ -738,10 +763,47 @@ mod shader_fix {
             };
             source.extend_from_slice(bytes);
         }
-        let fixed =
-            String::from_utf8_lossy(&source).replace(TEST, "defined(GL_FRAGMENT_PRECISION_HIGH)");
+        let fixed = String::from_utf8_lossy(&source)
+            .replace(PRECISION_TEST, "defined(GL_FRAGMENT_PRECISION_HIGH)");
         let fixed = CString::new(fixed).unwrap_or_default();
         let pointer = fixed.as_ptr();
         unsafe { real(shader, 1, &pointer, std::ptr::null()) };
+    }
+
+    /// GLES2 only draws u32 indices with OES_element_index_uint, which the
+    /// Mali-400 does not have. egui's meshes stay far below 65536 vertices, so
+    /// their indices go to the driver as u16.
+    unsafe extern "C" fn buffer_data(target: u32, size: isize, data: *const c_void, usage: u32) {
+        let Some(real) = BUFFER_DATA.get() else {
+            return;
+        };
+        if target == ELEMENT_ARRAY_BUFFER {
+            let narrowed = (!data.is_null() && size > 0 && size % 4 == 0)
+                .then(|| unsafe {
+                    std::slice::from_raw_parts(data.cast::<u32>(), size as usize / 4)
+                })
+                .and_then(|indices| {
+                    indices.iter().map(|&i| u16::try_from(i).ok()).collect::<Option<Vec<u16>>>()
+                });
+            SHORT_INDICES.store(narrowed.is_some(), Ordering::Relaxed);
+            if let Some(short) = narrowed {
+                let bytes = (short.len() * 2) as isize;
+                unsafe { real(target, bytes, short.as_ptr().cast(), usage) };
+                return;
+            }
+        }
+        unsafe { real(target, size, data, usage) };
+    }
+
+    unsafe extern "C" fn draw_elements(mode: u32, count: c_int, kind: u32, offset: *const c_void) {
+        let Some(real) = DRAW_ELEMENTS.get() else {
+            return;
+        };
+        if kind == UNSIGNED_INT && SHORT_INDICES.load(Ordering::Relaxed) {
+            let offset = (offset as usize / 2) as *const c_void;
+            unsafe { real(mode, count, UNSIGNED_SHORT, offset) };
+        } else {
+            unsafe { real(mode, count, kind, offset) };
+        }
     }
 }
