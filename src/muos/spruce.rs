@@ -24,8 +24,9 @@ pub(super) const HANDOFF: &str = "/tmp/zitch_next.sh";
 /// spruce's system for LÖVE games, one launcher each.
 const ITCH: &str = "ITCH";
 
-/// dash ids and the spruce Emu folder that plays them.
-const SYSTEM_DIRS: [(&str, &str); 24] = [
+/// dash ids and the spruce Emu folder that plays them; the first one
+/// spruce shows wins.
+const SYSTEM_DIRS: [(&str, &str); 25] = [
     ("nes", "FC"),
     ("snes", "SFC"),
     ("gb", "GB"),
@@ -48,7 +49,8 @@ const SYSTEM_DIRS: [(&str, &str); 24] = [
     ("saturn", "SATURN"),
     ("segacd", "SEGACD"),
     ("dreamcast", "DC"),
-    // fake-08 needs no PICO-8 licence, unlike spruce's PICO8 system.
+    // PICO8 shows once its licensed files are in BIOS; fake-08 needs none.
+    (PICO8, "PICO8"),
     (PICO8, "FAKE08"),
     (TIC80, "TIC"),
 ];
@@ -72,38 +74,52 @@ struct EmuConfig {
     label: String,
     #[serde(default)]
     default_emulator: String,
+    /// Groups of files, one of each group needed for spruce to show it.
+    #[serde(default)]
+    requiredfiles: Vec<Vec<String>>,
 }
 
-/// The systems whose Emu folder is on the card.
+/// The systems whose Emu folder is on the card and shown by spruce.
 pub(super) fn systems() -> HashMap<String, System> {
-    SYSTEM_DIRS
-        .iter()
-        .filter_map(|(id, dir)| {
-            let json = std::fs::read_to_string(emu_dir(dir).join("config.json")).ok()?;
-            let config: EmuConfig = match serde_json::from_str(&json) {
-                Ok(config) => config,
-                Err(error) => {
-                    log::warn!("Emu/{dir}/config.json: {error}");
-                    return None;
-                }
-            };
-            let label = if config.label.is_empty() {
-                dir.to_string()
-            } else {
-                config.label
-            };
-            Some((
-                id.to_string(),
-                System {
-                    id: id.to_string(),
-                    assign: dir.to_string(),
-                    launcher: "standard_launch.sh".to_string(),
-                    core: config.default_emulator,
-                    label,
-                },
-            ))
-        })
-        .collect()
+    let mut systems = HashMap::new();
+    for (id, dir) in SYSTEM_DIRS {
+        if systems.contains_key(id) {
+            continue;
+        }
+        let Ok(json) = std::fs::read_to_string(emu_dir(dir).join("config.json")) else {
+            continue;
+        };
+        let config: EmuConfig = match serde_json::from_str(&json) {
+            Ok(config) => config,
+            Err(error) => {
+                log::warn!("Emu/{dir}/config.json: {error}");
+                continue;
+            }
+        };
+        let shown = config
+            .requiredfiles
+            .iter()
+            .all(|group| group.iter().any(|file| Path::new(file).exists()));
+        if !shown {
+            continue;
+        }
+        let label = if config.label.is_empty() {
+            dir.to_string()
+        } else {
+            config.label
+        };
+        systems.insert(
+            id.to_string(),
+            System {
+                id: id.to_string(),
+                assign: dir.to_string(),
+                launcher: "standard_launch.sh".to_string(),
+                core: config.default_emulator,
+                label,
+            },
+        );
+    }
+    systems
 }
 
 fn emu_dir(dir: &str) -> PathBuf {
@@ -222,11 +238,7 @@ pub fn sync_roms(caves: &[Cave]) {
         if installed.contains(copied.cave.as_str()) {
             return true;
         }
-        match std::fs::remove_file(&copied.dest) {
-            Ok(()) => log::info!("removed {}", copied.dest.display()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => log::warn!("removing {}: {error}", copied.dest.display()),
-        }
+        remove_copy(&copied.dest);
         false
     });
     for cave in caves {
@@ -235,9 +247,6 @@ pub fn sync_roms(caves: &[Cave]) {
         };
         let roms = roms_in(Path::new(&info.install_folder));
         for rom in &roms {
-            if ledger.iter().any(|c| c.cave == cave.id && c.source == *rom) {
-                continue;
-            }
             let love = is_love(rom);
             let dir = if love {
                 if !emu_dir(ITCH).join("config.json").is_file() {
@@ -250,6 +259,14 @@ pub fn sync_roms(caves: &[Cave]) {
                     None => continue,
                 }
             };
+            let copied = ledger.iter().position(|c| c.cave == cave.id && c.source == *rom);
+            if let Some(index) = copied {
+                if ledger[index].dest.parent() == Some(roms_dir(dir).as_path()) {
+                    continue;
+                }
+                // Its system changed, as when PICO-8 itself is added.
+                remove_copy(&ledger.remove(index).dest);
+            }
             let ext = love.then_some("sh");
             let Some(dest) = destination(&game.title, rom, roms.len() > 1, dir, ext) else {
                 log::warn!("no free name in Roms/{dir} for {}", rom.display());
@@ -282,6 +299,14 @@ pub fn sync_roms(caves: &[Cave]) {
         }
     }
     write_ledger(&ledger);
+}
+
+fn remove_copy(dest: &Path) {
+    match std::fs::remove_file(dest) {
+        Ok(()) => log::info!("removed {}", dest.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => log::warn!("removing {}: {error}", dest.display()),
+    }
 }
 
 /// The ROM files in an install folder, by name. Disc images need their
