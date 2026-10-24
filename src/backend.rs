@@ -137,9 +137,12 @@ pub enum Command {
     /// Send a compatibility report, in the background.
     Report(Box<Report>),
     /// Search itch.io for games; answered by [`Event::SearchResults`].
-    Search {
-        query: String,
-        pages: u32,
+    Search(String),
+    /// One page of itch.io's browse listing at `path`, like `tag-nes`;
+    /// answered by [`Event::SearchResults`] with `path` as the query.
+    Browse {
+        path: String,
+        page: u32,
     },
     Shutdown,
 }
@@ -247,6 +250,8 @@ pub enum Event {
     SearchResults {
         query: String,
         games: Vec<Arc<Game>>,
+        /// The browse page after this one, while there are more.
+        next_page: Option<u32>,
     },
     SearchFailed {
         query: String,
@@ -685,7 +690,8 @@ impl Session<'_> {
             Command::Uninstall { cave_id, title } => self.uninstall(cave_id, title),
             Command::Launch { cave_id } => self.launch(cave_id),
             Command::Report(report) => self.report(*report),
-            Command::Search { query, pages } => self.search(query, pages),
+            Command::Search(query) => self.search(query),
+            Command::Browse { path, page } => self.browse(path, page),
             Command::QuitGame { cave_id } => {
                 self.launches.quit(&cave_id);
                 // A payload the firmware runs is our own child, not butler's.
@@ -737,35 +743,64 @@ impl Session<'_> {
 
     /// Searches itch.io itself; butler's Search.Games only looks in the
     /// local database.
-    fn search(&self, query: String, pages: u32) {
+    fn search(&self, query: String) {
         let profile_id = self.profile.id;
         let config = Arc::clone(self.config);
         let asked = query.clone();
         self.op(
             "search".into(),
-            move |error| Event::SearchFailed {
-                query: asked.clone(),
-                error: if is_offline(&error) {
-                    "Search needs a connection to itch.io".to_string()
-                } else {
-                    format!("Couldn't search: {error:#}")
-                },
-            },
+            move |error| search_failed(&asked, &error),
             move |_client, emit| {
-                let key = match &config.api_key {
-                    Some(key) => key.clone(),
-                    None => crate::report::saved_api_key(&config.dbpath, profile_id)?,
+                let key = api_key(&config, profile_id)?;
+                let games = crate::itch_search::search(&config.api_url, &key, &query)?;
+                emit.send(Event::SearchResults {
+                    query,
+                    games: games.into_iter().map(Arc::new).collect(),
+                    next_page: None,
+                });
+                Ok(())
+            },
+        );
+    }
+
+    fn browse(&self, path: String, page: u32) {
+        let profile_id = self.profile.id;
+        let config = Arc::clone(self.config);
+        let asked = path.clone();
+        self.op(
+            format!("browse-{page}"),
+            move |error| search_failed(&asked, &error),
+            move |_client, emit| {
+                let key = api_key(&config, profile_id)?;
+                let ids = crate::itch_search::browse_page(&path, page)?;
+                let next_page = (!ids.is_empty()).then_some(page + 1);
+                let lookup = |ids: Vec<i64>| {
+                    ids.into_iter()
+                        .filter_map(|id| {
+                            crate::itch_search::game(&config.api_url, &key, id)
+                                .map_err(|error| log::warn!("looking up game {id}: {error:#}"))
+                                .ok()
+                                .flatten()
+                        })
+                        .collect::<Vec<_>>()
                 };
-                // A few pages, since the device's filters leave out many.
-                let mut games = Vec::new();
-                for page in 1..=pages {
-                    let found = crate::itch_search::search(&config.api_url, &key, &query, page)?;
-                    if found.is_empty() {
-                        break;
-                    }
-                    games.extend(found.into_iter().map(Arc::new));
-                }
-                emit.send(Event::SearchResults { query, games });
+                // Two lookups at a time; itch.io refuses more.
+                let (even, odd): (Vec<i64>, Vec<i64>) = (
+                    ids.iter().step_by(2).copied().collect(),
+                    ids.iter().skip(1).step_by(2).copied().collect(),
+                );
+                let mut games = std::thread::scope(|scope| {
+                    let other = scope.spawn(|| lookup(odd));
+                    let mut games = lookup(even);
+                    games.extend(other.join().unwrap_or_default());
+                    games
+                });
+                games.sort_by_key(|game| ids.iter().position(|id| *id == game.id));
+                emit.send(Event::SearchResults {
+                    query: path,
+                    games: games.into_iter().map(Arc::new).collect(),
+                    next_page,
+                });
                 Ok(())
             },
         );
@@ -1442,6 +1477,24 @@ fn plan_launch(
 /// Runs a game and stays in the call until it exits, answering whatever
 /// butler asks along the way. A failure carries the tail of what butler
 /// logged at error level, which is where the game's stderr ends up.
+fn api_key(config: &Config, profile_id: i64) -> Result<String> {
+    match &config.api_key {
+        Some(key) => Ok(key.clone()),
+        None => crate::report::saved_api_key(&config.dbpath, profile_id),
+    }
+}
+
+fn search_failed(query: &str, error: &anyhow::Error) -> Event {
+    Event::SearchFailed {
+        query: query.to_string(),
+        error: if is_offline(error) {
+            "Search needs a connection to itch.io".to_string()
+        } else {
+            format!("Couldn't search: {error:#}")
+        },
+    }
+}
+
 /// `target` names a launch target by path, as `Launch.GetTargets` gave
 /// it; `name` is the game's title, for what the firmware shows while a
 /// payload of ours runs. Comes back with what was seen of the run.

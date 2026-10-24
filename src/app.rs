@@ -21,7 +21,7 @@ use crate::playable::{CollectionFilter, known_playable_here};
 use crate::qr::QrCode;
 use crate::report::{Rating, Report, Reports, Run, Runs, SavedReport, SavedRun};
 use crate::sample;
-use crate::search::{Search, Typed};
+use crate::search::{Asked, Search, Typed};
 use crate::self_update::{self, SelfUpdate};
 use crate::settings::Settings;
 use crate::ui;
@@ -1414,6 +1414,11 @@ impl App {
                     self.hide_window();
                 }
             }
+            Action::MoreGames { .. } if self.tab == Tab::Search => {
+                if let Some((path, page)) = self.search.more() {
+                    self.backend.send(Command::Browse { path, page });
+                }
+            }
             Action::MoreGames { row } => {
                 let Some(id) = self
                     .collection_rows
@@ -2605,13 +2610,21 @@ impl App {
                     self.rebuild_installs();
                     self.notify(format!("Couldn't cancel: {error}"));
                 }
-                Event::SearchResults { query, games } => {
+                Event::SearchResults {
+                    query,
+                    games,
+                    next_page,
+                } => {
                     self.catalog_add(Source::Search, &games);
-                    if self.search.found(&query, &games) {
+                    if self.search.found(&query, &games, next_page) {
                         self.rebuild_search_rows();
                     }
                 }
-                Event::SearchFailed { query, error } => self.search.failed(&query, error),
+                Event::SearchFailed { query, error } => {
+                    if let Some(error) = self.search.failed(&query, error) {
+                        self.notify(error);
+                    }
+                }
                 Event::UpdateCheckFailed(error) => {
                     self.checking_updates = false;
                     self.notify(format!("Couldn't check for updates: {error}"));
@@ -3253,15 +3266,17 @@ impl App {
             self.notify_offline("Search");
             return;
         }
-        // An empty box with a type chosen browses that type: its name as the
-        // query, more pages, and the type filter keeps what matches.
-        let browsing = self.search.query.trim().is_empty();
-        let browse = self.search.type_filter.as_deref().map(browse_query);
-        if let Some(query) = self.search.start(browse) {
-            self.toolbar_focus[tab_slot(Tab::Search)] = None;
-            let pages = if browsing { BROWSE_PAGES } else { SEARCH_PAGES };
-            self.backend.send(Command::Search { query, pages });
-        }
+        // An empty box with a type chosen browses that type's itch.io
+        // listing, and the type filter keeps what matches.
+        let browse = self.search.type_filter.as_deref().map(browse_listing);
+        let Some(asked) = self.search.start(browse) else {
+            return;
+        };
+        self.toolbar_focus[tab_slot(Tab::Search)] = None;
+        self.backend.send(match asked {
+            Asked::Query(query) => Command::Search(query),
+            Asked::Browse(path) => Command::Browse { path, page: 1 },
+        });
     }
 
     /// Drops what belonged to the profile. Installs and downloads are the
@@ -4200,19 +4215,30 @@ fn reported<'a>(
     Some((saved, current))
 }
 
-/// Pages of itch.io's results for a typed search, and for browsing a type.
-const SEARCH_PAGES: u32 = 3;
-const BROWSE_PAGES: u32 = 10;
-
-/// What to search itch.io for to browse a playable type.
-fn browse_query(id: &str) -> String {
-    match id {
-        "love" => "love2d".to_string(),
-        _ => crate::playable::playable_types()
-            .iter()
-            .find(|t| t.id == id)
-            .map_or_else(|| id.to_string(), |t| t.label.clone()),
-    }
+/// A playable type's name and the itch.io listing that browses it.
+fn browse_listing(id: &str) -> (String, String) {
+    let label = crate::playable::playable_types()
+        .iter()
+        .find(|t| t.id == id)
+        .map_or_else(|| id.to_string(), |t| t.label.clone());
+    let tag = match id {
+        "love" => return (label, "made-with-love2d".to_string()),
+        "linux-arm64-handheld" => return (label, "platform-linux".to_string()),
+        "pico8-cart" => "pico-8",
+        "tic80-cart" => "tic-80",
+        "rom:gb" => "gameboy",
+        "rom:gba" => "game-boy-advance",
+        "rom:md" => "mega-drive",
+        "rom:sms" => "master-system",
+        "rom:gg" => "game-gear",
+        "rom:pce" => "pc-engine",
+        "rom:ngp" => "neo-geo-pocket",
+        "rom:a26" => "atari-2600",
+        "rom:c64" => "commodore-64",
+        "rom:segacd" => "sega-cd",
+        other => other.strip_prefix("rom:").unwrap_or(other),
+    };
+    (label, format!("tag-{tag}"))
 }
 
 fn tab_slot(tab: Tab) -> usize {
