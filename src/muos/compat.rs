@@ -106,6 +106,11 @@ pub(super) fn love() -> Option<&'static Love> {
     if let Some(fake) = super::fake::firmware() {
         return fake.love;
     }
+    // On spruce LÖVE games are left to PortMaster, which ports them one at
+    // a time.
+    if super::is_spruce() {
+        return None;
+    }
     static LOVE: OnceLock<Option<Love>> = OnceLock::new();
     LOVE.get_or_init(|| {
         let ours = std::env::current_exe()

@@ -25,7 +25,7 @@ for f in "$STAGE/zitch" "$STAGE/libzitch-sdl.so" "$STAGE/gl4es/libGL.so.1"; do
     test "$(printf '%s\nGLIBC_%s\n' "$need" "$GLIBC_MAX" | sort -V | tail -1)" = "GLIBC_$GLIBC_MAX"
 done
 # Prebuilt by others; reported, not enforced.
-for f in "$STAGE/butler" "$STAGE/love" "$STAGE"/libs/*; do
+for f in "$STAGE/butler"; do
     need=$(${CROSS}-objdump -T "$f" 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
     echo "$(basename "$f"): ${need:-static}"
 done
@@ -34,6 +34,8 @@ done
 APP="$OUTPUT_DIR/App/zitch"
 rm -rf "$OUTPUT_DIR/App"
 mkdir -p "$APP"
-cp spruce/app/config.json spruce/app/launch.sh spruce/app/love.gptk spruce/app/zitch.png "$APP/"
+cp spruce/app/config.json spruce/app/launch.sh spruce/app/zitch.png "$APP/"
 cp -a "$STAGE" "$APP/zitch"
+# LÖVE games are left to PortMaster on spruce.
+rm -rf "$APP/zitch/love" "$APP/zitch/libs" "$APP/zitch/licenses/love.LICENSE" "$APP/zitch/licenses/luajit.LICENSE"
 echo "=== Done ==="

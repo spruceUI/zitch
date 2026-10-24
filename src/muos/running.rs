@@ -57,7 +57,7 @@ pub fn launch(
             run.core = Some(system.core.clone());
             run.launch_target = Some(format!("rom:{} {file}", system.id));
             if is_spruce() {
-                spruce::launch(content, args, env)
+                spruce::launch(path, system)
             } else {
                 launch_rom(name, system, path, env)
             }
@@ -68,11 +68,7 @@ pub fn launch(
                 Some(version) => format!("love:{version} {file}"),
                 None => format!("love {file}"),
             });
-            if is_spruce() {
-                spruce::launch(content, args, env)
-            } else {
-                launch_love(path, args, env, run)
-            }
+            launch_love(path, args, env, run)
         }
     };
     *RUNNING.lock().unwrap_or_else(|p| p.into_inner()) = None;

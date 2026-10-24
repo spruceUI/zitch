@@ -21,8 +21,6 @@ const SDCARD: &str = "/mnt/SDCARD";
 const HELPERS: &str = "/mnt/SDCARD/spruce/scripts/helperFunctions.sh";
 /// What the app's launch.sh runs after zitch exits, then starts zitch again.
 pub(super) const HANDOFF: &str = "/tmp/zitch_next.sh";
-/// spruce's system for LÖVE games, one launcher each.
-const ITCH: &str = "ITCH";
 
 /// dash ids and the spruce Emu folder that plays them; the first one
 /// spruce shows wins.
@@ -131,48 +129,16 @@ fn roms_dir(dir: &str) -> PathBuf {
 }
 
 /// Writes the command for launch.sh and asks the interface to close.
-pub(super) fn launch(
-    content: &Content,
-    args: &[String],
-    env: &HashMap<String, String>,
-) -> Result<()> {
-    let script = match content {
-        Content::Rom { path, system } => {
-            let rom = copy_of(path).unwrap_or_else(|| path.clone());
-            // standard_launch.sh takes its system from the Emu folder in
-            // its own path.
-            let launcher =
-                emu_dir(&system.assign).join("../../spruce/scripts/emu/standard_launch.sh");
-            format!("{} {}\n", quote_path(&launcher), quote_path(&rom))
-        }
-        Content::Love { path } => match copy_of(path) {
-            // The Roms/ITCH launcher, through spruce like a menu launch.
-            Some(sh) if args.is_empty() && env.is_empty() => {
-                let launcher = emu_dir(ITCH).join("../../spruce/scripts/emu/standard_launch.sh");
-                format!("{} {}\n", quote_path(&launcher), quote_path(&sh))
-            }
-            _ => {
-                let mut words = vec!["env".to_string()];
-                words.extend(env.iter().map(|(k, v)| quote(&format!("{k}={v}"))));
-                words.push(quote_path(&app_launcher()?));
-                words.push("--love".into());
-                words.push(quote_path(path));
-                words.extend(args.iter().map(|arg| quote(arg)));
-                words.join(" ") + "\n"
-            }
-        },
-    };
+pub(super) fn launch(path: &Path, system: &System) -> Result<()> {
+    let rom = copy_of(path).unwrap_or_else(|| path.to_path_buf());
+    // standard_launch.sh takes its system from the Emu folder in its own
+    // path.
+    let launcher = emu_dir(&system.assign).join("../../spruce/scripts/emu/standard_launch.sh");
+    let script = format!("{} {}\n", quote_path(&launcher), quote_path(&rom));
     std::fs::write(HANDOFF, script).with_context(|| format!("writing {HANDOFF}"))?;
-    log::info!("handed {} to launch.sh", content.path().display());
+    log::info!("handed {} to launch.sh", path.display());
     EXIT.store(true, Ordering::SeqCst);
     Ok(())
-}
-
-/// The app's launch.sh, two folders up from the binary.
-fn app_launcher() -> Result<PathBuf> {
-    let exe = std::env::current_exe().context("finding zitch")?;
-    let app = exe.parent().and_then(Path::parent).context("zitch is not in an app folder")?;
-    Ok(app.join("launch.sh"))
 }
 
 fn quote(word: &str) -> String {
@@ -235,7 +201,8 @@ pub fn sync_roms(caves: &[Cave]) {
     let mut ledger = read_ledger();
     let installed: HashSet<&str> = caves.iter().map(|c| c.id.as_str()).collect();
     ledger.retain(|copied| {
-        if installed.contains(copied.cave.as_str()) {
+        // A launcher for a LÖVE game counts as gone too.
+        if installed.contains(copied.cave.as_str()) && System::for_file(&copied.source).is_some() {
             return true;
         }
         remove_copy(&copied.dest);
@@ -247,18 +214,10 @@ pub fn sync_roms(caves: &[Cave]) {
         };
         let roms = roms_in(Path::new(&info.install_folder));
         for rom in &roms {
-            let love = is_love(rom);
-            let dir = if love {
-                if !emu_dir(ITCH).join("config.json").is_file() {
-                    continue;
-                }
-                ITCH
-            } else {
-                match System::for_file(rom) {
-                    Some(system) => system.assign.as_str(),
-                    None => continue,
-                }
+            let Some(system) = System::for_file(rom) else {
+                continue;
             };
+            let dir = system.assign.as_str();
             let copied = ledger.iter().position(|c| c.cave == cave.id && c.source == *rom);
             if let Some(index) = copied {
                 if ledger[index].dest.parent() == Some(roms_dir(dir).as_path()) {
@@ -267,8 +226,7 @@ pub fn sync_roms(caves: &[Cave]) {
                 // Its system changed, as when PICO-8 itself is added.
                 remove_copy(&ledger.remove(index).dest);
             }
-            let ext = love.then_some("sh");
-            let Some(dest) = destination(&game.title, rom, roms.len() > 1, dir, ext) else {
+            let Some(dest) = destination(&game.title, rom, roms.len() > 1, dir) else {
                 log::warn!("no free name in Roms/{dir} for {}", rom.display());
                 continue;
             };
@@ -278,13 +236,8 @@ pub fn sync_roms(caves: &[Cave]) {
                 log::warn!("creating {}: {error}", parent.display());
                 continue;
             }
-            let made = if love {
-                write_launcher(&game.title, rom, &dest)
-            } else {
-                std::fs::copy(rom, &dest).map(|_| ())
-            };
-            match made {
-                Ok(()) => {
+            match std::fs::copy(rom, &dest) {
+                Ok(_) => {
                     log::info!("copied {} to {}", rom.display(), dest.display());
                     ledger.push(Copied {
                         cave: cave.id.clone(),
@@ -322,7 +275,7 @@ fn roms_in(folder: &Path) -> Vec<PathBuf> {
                 if depth < 3 {
                     dirs.push((path, depth + 1));
                 }
-            } else if System::for_file(&path).is_some() || is_love(&path) {
+            } else if System::for_file(&path).is_some() {
                 found.push(path);
             }
         }
@@ -331,44 +284,17 @@ fn roms_in(folder: &Path) -> Vec<PathBuf> {
     found
 }
 
-fn is_love(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("love"))
-}
-
-/// A Roms/ITCH entry that runs a LÖVE game through the app's launch.sh,
-/// which sets up SDL for whichever device the card is in.
-fn write_launcher(title: &str, game: &Path, dest: &Path) -> std::io::Result<()> {
-    let launcher = app_launcher().map_err(std::io::Error::other)?;
-    let script = format!(
-        "#!/bin/sh\n# {} from itch.io, installed by the itch.io app.\nexec {} --love {}\n",
-        title.replace('\n', " "),
-        quote_path(&launcher),
-        quote_path(game),
-    );
-    std::fs::write(dest, script)
-}
-
 /// `Roms/<SYS>/<Title>.<ext>`, with the file's own name added when the game
-/// has several ROMs, and "(itch.io)" when the name is taken. `as_ext`
-/// replaces the extension, for a launcher.
-fn destination(
-    title: &str,
-    rom: &Path,
-    several: bool,
-    dir: &str,
-    as_ext: Option<&str>,
-) -> Option<PathBuf> {
+/// has several ROMs, and "(itch.io)" when the name is taken.
+fn destination(title: &str, rom: &Path, several: bool, dir: &str) -> Option<PathBuf> {
     let name = rom.file_name()?.to_str()?;
     // .p8.png keeps both parts.
-    let own_ext = if name.to_ascii_lowercase().ends_with(".p8.png") {
+    let ext = if name.to_ascii_lowercase().ends_with(".p8.png") {
         "p8.png".to_string()
     } else {
         rom.extension()?.to_str()?.to_string()
     };
-    let stem = name[..name.len() - own_ext.len() - 1].to_string();
-    let ext = as_ext.map_or(own_ext, str::to_string);
+    let stem = name[..name.len() - ext.len() - 1].to_string();
     let mut base = safe_name(title);
     if several {
         base = format!("{base} - {}", safe_name(&stem));
