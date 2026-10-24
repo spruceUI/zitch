@@ -67,6 +67,21 @@ if ! (zitch_env); then
 fi
 
 chmod +x "$APP_DIR/zitch/zitch" "$APP_DIR/zitch/butler" "$APP_DIR/zitch/love"
+
+# The launchers zitch writes to Roms/ITCH run a LÖVE game through here, so
+# the SDL setup always matches the device the card is in.
+if [ "$1" = "--love" ]; then
+    shift
+    (
+        zitch_env
+        cd "$APP_DIR/zitch" || exit 1
+        export LD_LIBRARY_PATH="$APP_DIR/zitch/libs:$APP_DIR/zitch/gl4es:$LD_LIBRARY_PATH"
+        export LOVE_GRAPHICS_USE_OPENGLES=1
+        ./love "$@"
+    ) >>"/mnt/SDCARD/Saves/spruce/zitch-love.log" 2>&1
+    exit $?
+fi
+
 : >"$LOG"
 
 while :; do
