@@ -139,6 +139,7 @@ pub enum Command {
     /// Search itch.io for games; answered by [`Event::SearchResults`].
     Search {
         query: String,
+        pages: u32,
     },
     Shutdown,
 }
@@ -684,7 +685,7 @@ impl Session<'_> {
             Command::Uninstall { cave_id, title } => self.uninstall(cave_id, title),
             Command::Launch { cave_id } => self.launch(cave_id),
             Command::Report(report) => self.report(*report),
-            Command::Search { query } => self.search(query),
+            Command::Search { query, pages } => self.search(query, pages),
             Command::QuitGame { cave_id } => {
                 self.launches.quit(&cave_id);
                 // A payload the firmware runs is our own child, not butler's.
@@ -736,7 +737,7 @@ impl Session<'_> {
 
     /// Searches itch.io itself; butler's Search.Games only looks in the
     /// local database.
-    fn search(&self, query: String) {
+    fn search(&self, query: String, pages: u32) {
         let profile_id = self.profile.id;
         let config = Arc::clone(self.config);
         let asked = query.clone();
@@ -757,7 +758,7 @@ impl Session<'_> {
                 };
                 // A few pages, since the device's filters leave out many.
                 let mut games = Vec::new();
-                for page in 1..=SEARCH_PAGES {
+                for page in 1..=pages {
                     let found = crate::itch_search::search(&config.api_url, &key, &query, page)?;
                     if found.is_empty() {
                         break;
@@ -2355,9 +2356,6 @@ fn sign_in(client: &Client, config: &Config, emit: &Emitter) -> Result<Option<Pr
         .map(Some)
         .ok_or_else(|| anyhow!("login returned no profile"))
 }
-
-/// How many pages of itch.io's results one search fetches.
-const SEARCH_PAGES: u32 = 3;
 
 /// The OAuth client registered for the device sign-in.
 const LOGIN_CLIENT_ID: &str = "d59031fc193811bb3e6af0f8eeeb2c18";

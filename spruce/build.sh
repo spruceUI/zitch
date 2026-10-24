@@ -34,6 +34,6 @@ done
 APP="$OUTPUT_DIR/App/zitch"
 rm -rf "$OUTPUT_DIR/App"
 mkdir -p "$APP"
-cp spruce/app/config.json spruce/app/launch.sh spruce/app/zitch.png "$APP/"
+cp spruce/app/config.json spruce/app/launch.sh spruce/app/love.gptk spruce/app/zitch.png "$APP/"
 cp -a "$STAGE" "$APP/zitch"
 echo "=== Done ==="

@@ -73,13 +73,12 @@ impl Search {
 
     /// Closes the keyboard and clears the old results for a search of the
     /// query, returning it; none when there is nothing to search for.
-    pub fn start(&mut self) -> Option<String> {
-        let query = self.query.trim().to_string();
-        if query.is_empty() {
-            return None;
-        }
+    /// `browse` stands in for an empty query: the chosen type's name.
+    pub fn start(&mut self, browse: Option<String>) -> Option<String> {
+        let typed = self.query.trim().to_string();
+        let query = if typed.is_empty() { browse? } else { typed.clone() };
         self.keyboard = None;
-        self.query = query.clone();
+        self.query = typed;
         self.searched = query.clone();
         self.results = Loadable::Loading;
         self.rows = ui::Rows::default();

@@ -77,7 +77,11 @@ if [ "$1" = "--love" ]; then
         cd "$APP_DIR/zitch" || exit 1
         export LD_LIBRARY_PATH="$APP_DIR/zitch/libs:$APP_DIR/zitch/gl4es:$LD_LIBRARY_PATH"
         export LOVE_GRAPHICS_USE_OPENGLES=1
+        # LÖVE's error screen only quits on Escape; Select+Start always ends it.
+        /mnt/SDCARD/spruce/bin64/gptokeyb -k love -c "$APP_DIR/love.gptk" &
+        gptk=$!
         ./love "$@"
+        kill -9 "$gptk" 2>/dev/null
     ) >>"/mnt/SDCARD/Saves/spruce/zitch-love.log" 2>&1
     exit $?
 fi

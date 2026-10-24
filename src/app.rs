@@ -1358,8 +1358,12 @@ impl App {
             Action::SetSearchType(wanted) => {
                 if self.search.type_filter != wanted {
                     self.search.type_filter = wanted;
-                    self.rebuild_search_rows();
-                    self.search.rows.follow = true;
+                    if self.search.query.trim().is_empty() && self.search.type_filter.is_some() {
+                        self.run_search();
+                    } else {
+                        self.rebuild_search_rows();
+                        self.search.rows.follow = true;
+                    }
                 }
             }
             Action::SetRatingFilter(filter) => {
@@ -3249,9 +3253,14 @@ impl App {
             self.notify_offline("Search");
             return;
         }
-        if let Some(query) = self.search.start() {
+        // An empty box with a type chosen browses that type: its name as the
+        // query, more pages, and the type filter keeps what matches.
+        let browsing = self.search.query.trim().is_empty();
+        let browse = self.search.type_filter.as_deref().map(browse_query);
+        if let Some(query) = self.search.start(browse) {
             self.toolbar_focus[tab_slot(Tab::Search)] = None;
-            self.backend.send(Command::Search { query });
+            let pages = if browsing { BROWSE_PAGES } else { SEARCH_PAGES };
+            self.backend.send(Command::Search { query, pages });
         }
     }
 
@@ -4189,6 +4198,21 @@ fn reported<'a>(
                 && cave.build.as_ref().map(|b| b.id) == saved.build_id
         });
     Some((saved, current))
+}
+
+/// Pages of itch.io's results for a typed search, and for browsing a type.
+const SEARCH_PAGES: u32 = 3;
+const BROWSE_PAGES: u32 = 10;
+
+/// What to search itch.io for to browse a playable type.
+fn browse_query(id: &str) -> String {
+    match id {
+        "love" => "love2d".to_string(),
+        _ => crate::playable::playable_types()
+            .iter()
+            .find(|t| t.id == id)
+            .map_or_else(|| id.to_string(), |t| t.label.clone()),
+    }
 }
 
 fn tab_slot(tab: Tab) -> usize {
