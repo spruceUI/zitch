@@ -734,8 +734,11 @@ impl Session<'_> {
         );
     }
 
+    /// Searches itch.io itself; butler's Search.Games only looks in the
+    /// local database.
     fn search(&self, query: String) {
         let profile_id = self.profile.id;
+        let config = Arc::clone(self.config);
         let asked = query.clone();
         self.op(
             "search".into(),
@@ -747,8 +750,13 @@ impl Session<'_> {
                     format!("Couldn't search: {error:#}")
                 },
             },
-            move |client, emit| {
-                let games = search_games(client, profile_id, &query)?;
+            move |_client, emit| {
+                let key = match &config.api_key {
+                    Some(key) => key.clone(),
+                    None => crate::report::saved_api_key(&config.dbpath, profile_id)?,
+                };
+                let games = crate::itch_search::search(&config.api_url, &key, &query, 1)?;
+                let games = games.into_iter().map(Arc::new).collect();
                 emit.send(Event::SearchResults { query, games });
                 Ok(())
             },
@@ -2726,17 +2734,6 @@ fn collection_page(
             .collect(),
         page.next_cursor.filter(|c| !c.is_empty()),
     ))
-}
-
-/// Games on itch.io matching the query.
-#[allow(deprecated)]
-fn search_games(client: &Client, profile_id: i64, query: &str) -> Result<Vec<Arc<Game>>> {
-    use crate::butlerd::types::SearchGamesParams;
-    let result = client.call(SearchGamesParams {
-        profile_id,
-        query: query.to_string(),
-    })?;
-    Ok(result.games.into_iter().map(Arc::new).collect())
 }
 
 fn all_caves(client: &Client) -> Result<Vec<Cave>> {

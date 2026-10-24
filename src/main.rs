@@ -11,6 +11,7 @@ mod host_sdl;
 mod http;
 mod images;
 mod intro;
+mod itch_search;
 mod json_file;
 mod model;
 mod muos;
