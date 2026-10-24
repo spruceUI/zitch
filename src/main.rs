@@ -24,6 +24,8 @@ mod sample;
 mod search;
 mod self_update;
 mod settings;
+#[cfg(feature = "soft-render")]
+mod soft_screen;
 mod ui;
 
 use std::path::{Path, PathBuf};

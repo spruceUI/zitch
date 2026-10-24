@@ -50,13 +50,14 @@ zitch_env() {
             export ZITCH_SCREEN_ROTATION="$DISPLAY_ROTATION"
             ;;
         "MiyooMini")
-            # PyUI's SDL2: GLES through SwiftShader, the buttons sent as keys.
+            # PyUI's SDL2. Its GL is SwiftShader, too slow for egui, so zitch
+            # draws on the CPU and shows frames through SDL's 2D renderer.
             export PATH="/mnt/SDCARD/spruce/miyoomini/bin:$PATH"
             export LD_LIBRARY_PATH="/mnt/SDCARD/spruce/miyoomini/lib:$LD_LIBRARY_PATH"
             export SDL_VIDEODRIVER=mmiyoo
             export SDL_AUDIODRIVER=mmiyoo
-            export EGL_VIDEODRIVER=mmiyoo
             export SDL_MMIYOO_DOUBLE_BUFFER=1
+            export ZITCH_SOFT_RENDER=1
             export ZITCH_KEYPAD=miyoo
             ;;
         "Zero28" | "Zero40" | "XU20")

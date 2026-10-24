@@ -27,7 +27,10 @@ mkdir -p "$STAGE"
 
 echo "=== Building zitch ${ZITCH_VERSION} for ${DEVICE} ==="
 git config --global --add safe.directory /src
-cargo build --release --target "$TARGET" --no-default-features --features sdl-host
+# The Mini's only GL is a software one, too slow for egui; it draws on the CPU.
+FEATURES=sdl-host
+[ "$DEVICE" = "mini" ] && FEATURES=sdl-host,soft-render
+cargo build --release --target "$TARGET" --no-default-features --features "$FEATURES"
 cp "target/$TARGET/release/zitch" "$STAGE/"
 
 echo "=== Building butler $BUTLER_REV ==="

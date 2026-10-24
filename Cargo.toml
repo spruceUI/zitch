@@ -18,8 +18,11 @@ eframe = { version = "0.36", default-features = false, features = ["glow", "defa
 egui = "0.36"
 # The handheld host: no window system, so SDL2 (the firmware's own build,
 # which knows the Mali framebuffer) opens the screen and egui_glow draws.
-sdl2 = { version = "0.38", optional = true }
+sdl2 = { version = "0.38", optional = true, features = ["unsafe_textures"] }
 egui_glow = { version = "0.36", default-features = false, optional = true }
+# Draws egui on the CPU where the firmware's GL is too slow (the Miyoo Mini's
+# SwiftShader); see vendor/egui_software_backend/VENDORED.md.
+egui_software_backend = { path = "vendor/egui_software_backend", optional = true, features = ["rayon"] }
 # Cover formats itch.io serves, plus png for --screenshot captures.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # Cover downloads. Blocking on a few worker threads is all a launcher needs.
@@ -43,6 +46,8 @@ default = ["eframe-host", "gilrs"]
 eframe-host = ["dep:eframe"]
 # SDL2 window and GLES2 drawing; controllers come through SDL too.
 sdl-host = ["dep:sdl2", "dep:egui_glow"]
+# The SDL host drawing through SDL's 2D renderer instead of GL.
+soft-render = ["sdl-host", "dep:egui_software_backend"]
 
 [profile.dev.package."*"]
 opt-level = 2

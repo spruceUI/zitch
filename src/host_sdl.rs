@@ -145,39 +145,12 @@ pub fn run(
         .game_controller()
         .map_err(|e| anyhow!("SDL controllers: {e}"))?;
     log::info!("SDL video driver: {}", video.current_video_driver());
-    {
-        use sdl2::sys::{SDL_GLattr, SDL_GLprofile};
-        gl_attribute(
-            SDL_GLattr::SDL_GL_CONTEXT_PROFILE_MASK,
-            SDL_GLprofile::SDL_GL_CONTEXT_PROFILE_ES as i32,
-        );
-        gl_attribute(SDL_GLattr::SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-        gl_attribute(SDL_GLattr::SDL_GL_CONTEXT_MINOR_VERSION, 0);
-        gl_attribute(SDL_GLattr::SDL_GL_DOUBLEBUFFER, 1);
-        gl_attribute(SDL_GLattr::SDL_GL_DEPTH_SIZE, 0);
-    }
     let mut builder = video.window("zitch", window.size.0 as u32, window.size.1 as u32);
-    builder.opengl().position_centered();
+    builder.position_centered();
     if window.fullscreen {
         builder.fullscreen_desktop();
     }
-    let sdl_window = builder.build().context("opening the window")?;
-    let gl_context = sdl_window
-        .gl_create_context()
-        .map_err(|e| anyhow!("creating a GLES2 context: {e}"))?;
-    sdl_window
-        .gl_make_current(&gl_context)
-        .map_err(|e| anyhow!("making the GL context current: {e}"))?;
-    if let Err(error) = video.gl_set_swap_interval(1) {
-        log::warn!("no vsync: {error}");
-    }
-    let gl = unsafe {
-        egui_glow::glow::Context::from_loader_function(|name| {
-            gl_fix::wrap(name, video.gl_get_proc_address(name) as *const std::ffi::c_void)
-        })
-    };
-    let mut painter = egui_glow::Painter::new(Arc::new(gl), "", None, false)
-        .map_err(|e| anyhow!("setting up the egui painter: {e}"))?;
+    let mut screen = Screen::open(&video, builder)?;
     video.text_input().start();
 
     let ctx = egui::Context::default();
@@ -253,8 +226,8 @@ pub fn run(
             stats.passes += 1;
             stats.input += u32::from(!sdl_events.is_empty());
         }
-        let (w, _) = sdl_window.size();
-        let (dw, dh) = sdl_window.drawable_size();
+        let (w, _) = screen.window().size();
+        let (dw, dh) = screen.window().drawable_size();
         let native_ppp = if w > 0 { dw as f32 / w as f32 } else { 1.0 };
         // A turned screen is laid out upright; gl_fix turns the frame.
         let (pw, ph) = if gl_fix::quarter_turn() { (dh, dw) } else { (dw, dh) };
@@ -323,7 +296,7 @@ pub fn run(
             viewport_id: egui::ViewportId::ROOT,
             viewports: std::iter::once((egui::ViewportId::ROOT, viewport)).collect(),
             screen_rect: Some(screen),
-            max_texture_side: Some(painter.max_texture_side()),
+            max_texture_side: Some(screen.max_texture_side()),
             time: Some(started.elapsed().as_secs_f64()),
             events: std::mem::take(&mut input.events),
             focused: true,
@@ -393,32 +366,23 @@ pub fn run(
             // Nothing is drawn, but egui's textures move on (the font
             // atlas grows, covers arrive) and the painter has to follow or
             // the next visible frame draws with stale ones.
-            for (id, deltas) in &textures_delta.set {
-                for delta in deltas {
-                    painter.set_texture(*id, delta);
-                }
-            }
-            for id in &textures_delta.free {
-                painter.free_texture(*id);
-            }
+            screen.follow_textures(&textures_delta);
             continue;
         }
         let primitives = ctx.tessellate(shapes, pixels_per_point);
         if std::mem::take(&mut scrub) {
             for _ in 0..2 {
-                painter.clear([pw, ph], SCRUB_COLOR);
-                sdl_window.gl_swap_window();
+                screen.clear([pw, ph], SCRUB_COLOR);
+                screen.present();
             }
         }
-        painter.clear([pw, ph], [0.0, 0.0, 0.0, 1.0]);
-        painter.paint_and_update_textures(
-            [pw, ph],
-            pixels_per_point,
-            &primitives,
-            &mut textures_delta,
-        );
+        screen.clear([pw, ph], [0.0, 0.0, 0.0, 1.0]);
+        let painted = screen.paint([pw, ph], pixels_per_point, &primitives, &mut textures_delta);
+        if let Err(error) = painted {
+            log::warn!("{error:#}");
+        }
         for data in shots.drain(..) {
-            let image = painter.read_screen_rgba([pw, ph]);
+            let image = screen.read_screen_rgba([pw, ph]);
             input.events.push(egui::Event::Screenshot {
                 viewport_id: egui::ViewportId::ROOT,
                 user_data: data,
@@ -426,7 +390,7 @@ pub fn run(
             });
             wait = Duration::ZERO;
         }
-        sdl_window.gl_swap_window();
+        screen.present();
         if let Some(stats) = &mut stats {
             stats.drawn += 1;
         }
@@ -435,8 +399,150 @@ pub fn run(
         }
     }
     app.on_close();
-    painter.destroy();
+    screen.destroy();
     Ok(())
+}
+
+/// Where frames go: GLES through egui_glow, or, built with soft-render and
+/// asked for with ZITCH_SOFT_RENDER=1, SDL's 2D renderer fed by a CPU
+/// rasterizer where the firmware's GL is too slow.
+enum Screen {
+    Gl {
+        window: sdl2::video::Window,
+        _context: sdl2::video::GLContext,
+        painter: egui_glow::Painter,
+    },
+    #[cfg(feature = "soft-render")]
+    Soft(crate::soft_screen::SoftScreen),
+}
+
+impl Screen {
+    fn open(video: &sdl2::VideoSubsystem, mut builder: sdl2::video::WindowBuilder) -> Result<Self> {
+        #[cfg(feature = "soft-render")]
+        if std::env::var_os("ZITCH_SOFT_RENDER").is_some_and(|v| v == "1") {
+            let window = builder.build().context("opening the window")?;
+            log::info!("drawing on the CPU through SDL's 2D renderer");
+            return Ok(Self::Soft(crate::soft_screen::SoftScreen::new(window)?));
+        }
+        {
+            use sdl2::sys::{SDL_GLattr, SDL_GLprofile};
+            gl_attribute(
+                SDL_GLattr::SDL_GL_CONTEXT_PROFILE_MASK,
+                SDL_GLprofile::SDL_GL_CONTEXT_PROFILE_ES as i32,
+            );
+            gl_attribute(SDL_GLattr::SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+            gl_attribute(SDL_GLattr::SDL_GL_CONTEXT_MINOR_VERSION, 0);
+            gl_attribute(SDL_GLattr::SDL_GL_DOUBLEBUFFER, 1);
+            gl_attribute(SDL_GLattr::SDL_GL_DEPTH_SIZE, 0);
+        }
+        builder.opengl();
+        let window = builder.build().context("opening the window")?;
+        let context = window
+            .gl_create_context()
+            .map_err(|e| anyhow!("creating a GLES2 context: {e}"))?;
+        window
+            .gl_make_current(&context)
+            .map_err(|e| anyhow!("making the GL context current: {e}"))?;
+        if let Err(error) = video.gl_set_swap_interval(1) {
+            log::warn!("no vsync: {error}");
+        }
+        let gl = unsafe {
+            egui_glow::glow::Context::from_loader_function(|name| {
+                gl_fix::wrap(name, video.gl_get_proc_address(name) as *const std::ffi::c_void)
+            })
+        };
+        let painter = egui_glow::Painter::new(Arc::new(gl), "", None, false)
+            .map_err(|e| anyhow!("setting up the egui painter: {e}"))?;
+        Ok(Self::Gl {
+            window,
+            _context: context,
+            painter,
+        })
+    }
+
+    fn window(&self) -> &sdl2::video::Window {
+        match self {
+            Self::Gl { window, .. } => window,
+            #[cfg(feature = "soft-render")]
+            Self::Soft(soft) => soft.window(),
+        }
+    }
+
+    fn max_texture_side(&self) -> usize {
+        match self {
+            Self::Gl { painter, .. } => painter.max_texture_side(),
+            #[cfg(feature = "soft-render")]
+            Self::Soft(_) => crate::soft_screen::MAX_TEXTURE_SIDE,
+        }
+    }
+
+    /// egui's textures move on while nothing is drawn (the font atlas
+    /// grows, covers arrive); the next visible frame needs them current.
+    fn follow_textures(&mut self, delta: &egui::TexturesDelta) {
+        match self {
+            Self::Gl { painter, .. } => {
+                for (id, deltas) in &delta.set {
+                    for delta in deltas {
+                        painter.set_texture(*id, delta);
+                    }
+                }
+                for id in &delta.free {
+                    painter.free_texture(*id);
+                }
+            }
+            #[cfg(feature = "soft-render")]
+            Self::Soft(soft) => soft.follow_textures(delta),
+        }
+    }
+
+    fn clear(&mut self, size: [u32; 2], rgba: [f32; 4]) {
+        match self {
+            Self::Gl { painter, .. } => painter.clear(size, rgba),
+            #[cfg(feature = "soft-render")]
+            Self::Soft(soft) => soft.clear(rgba),
+        }
+    }
+
+    fn paint(
+        &mut self,
+        size: [u32; 2],
+        pixels_per_point: f32,
+        primitives: &[egui::ClippedPrimitive],
+        delta: &mut egui::TexturesDelta,
+    ) -> Result<()> {
+        match self {
+            Self::Gl { painter, .. } => {
+                painter.paint_and_update_textures(size, pixels_per_point, primitives, delta);
+                Ok(())
+            }
+            #[cfg(feature = "soft-render")]
+            Self::Soft(soft) => soft.paint(size, pixels_per_point, primitives, delta),
+        }
+    }
+
+    fn read_screen_rgba(&self, size: [u32; 2]) -> egui::ColorImage {
+        match self {
+            Self::Gl { painter, .. } => painter.read_screen_rgba(size),
+            #[cfg(feature = "soft-render")]
+            Self::Soft(soft) => soft.read_screen_rgba(),
+        }
+    }
+
+    fn present(&mut self) {
+        match self {
+            Self::Gl { window, .. } => window.gl_swap_window(),
+            #[cfg(feature = "soft-render")]
+            Self::Soft(soft) => soft.present(),
+        }
+    }
+
+    fn destroy(self) {
+        match self {
+            Self::Gl { mut painter, .. } => painter.destroy(),
+            #[cfg(feature = "soft-render")]
+            Self::Soft(_) => {}
+        }
+    }
 }
 
 /// The sdl2 crate panics when SDL refuses a GL attribute. The Miyoo Mini's
