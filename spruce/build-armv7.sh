@@ -1,10 +1,13 @@
 #!/bin/bash
+# The 32-bit builds, one per device that needs its own (DEVICE=a30 or mini),
+# all with the A30 toolchain: Cortex-A7, glibc 2.23.
 set -e
 
 OUTPUT_DIR="${OUTPUT_DIR:-/output}"
 CROSS=arm-a30-linux-gnueabihf
 TARGET=armv7-unknown-linux-gnueabihf
 GLIBC_MAX=2.23
+: "${DEVICE:?the device to build for, a30 or mini}"
 : "${BUTLER_REV:?the butler commit to build}"
 LIBC7ZIP_REV=4d582fd820a490efaa3958f3cd5ff3c07398a813
 SEVENZIP=7z2603
@@ -22,7 +25,7 @@ STAGE=/tmp/stage
 rm -rf "$STAGE" /tmp/butler /tmp/libc7zip /tmp/7z
 mkdir -p "$STAGE"
 
-echo "=== Building zitch ${ZITCH_VERSION} for the A30 ==="
+echo "=== Building zitch ${ZITCH_VERSION} for ${DEVICE} ==="
 git config --global --add safe.directory /src
 cargo build --release --target "$TARGET" --no-default-features --features sdl-host
 cp "target/$TARGET/release/zitch" "$STAGE/"
@@ -68,9 +71,9 @@ for f in "$STAGE"/*; do
 done
 
 mkdir -p "$OUTPUT_DIR/App/zitch"
-rm -rf "$OUTPUT_DIR/App/zitch/zitch-a30"
-cp -a "$STAGE" "$OUTPUT_DIR/App/zitch/zitch-a30"
+rm -rf "$OUTPUT_DIR/App/zitch/zitch-$DEVICE"
+cp -a "$STAGE" "$OUTPUT_DIR/App/zitch/zitch-$DEVICE"
 # zitch's own and butler's sit in zitch/licenses beside the 64-bit build.
-mkdir -p "$OUTPUT_DIR/App/zitch/zitch-a30/licenses"
-cp /tmp/7z/DOC/License.txt "$OUTPUT_DIR/App/zitch/zitch-a30/licenses/7zip.LICENSE"
+mkdir -p "$OUTPUT_DIR/App/zitch/zitch-$DEVICE/licenses"
+cp /tmp/7z/DOC/License.txt "$OUTPUT_DIR/App/zitch/zitch-$DEVICE/licenses/7zip.LICENSE"
 echo "=== Done ==="

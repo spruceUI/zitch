@@ -13,6 +13,7 @@ HANDOFF=/tmp/zitch_next.sh
 # Each 32-bit device has a build of its own; the rest share the aarch64 one.
 case "$PLATFORM" in
     "A30") BIN_DIR="$APP_DIR/zitch-a30" ;;
+    "MiyooMini") BIN_DIR="$APP_DIR/zitch-mini" ;;
     *) BIN_DIR="$APP_DIR/zitch" ;;
 esac
 
@@ -47,6 +48,16 @@ zitch_env() {
             export ZITCH_IGNORE_KEYBOARD=1
             # The panel is mounted on its side; zitch turns its frame as PyUI does.
             export ZITCH_SCREEN_ROTATION="$DISPLAY_ROTATION"
+            ;;
+        "MiyooMini")
+            # PyUI's SDL2: GLES through SwiftShader, the buttons sent as keys.
+            export PATH="/mnt/SDCARD/spruce/miyoomini/bin:$PATH"
+            export LD_LIBRARY_PATH="/mnt/SDCARD/spruce/miyoomini/lib:$LD_LIBRARY_PATH"
+            export SDL_VIDEODRIVER=mmiyoo
+            export SDL_AUDIODRIVER=mmiyoo
+            export EGL_VIDEODRIVER=mmiyoo
+            export SDL_MMIYOO_DOUBLE_BUFFER=1
+            export ZITCH_KEYPAD=miyoo
             ;;
         "Zero28" | "Zero40" | "XU20")
             LD_LIBRARY_PATH="$(magicx_pyui_sdl_dir):$LD_LIBRARY_PATH"
@@ -93,6 +104,8 @@ while :; do
     (
         zitch_env
         cd "$BIN_DIR" || exit 1
+        # The graphics memory the menu or a game left behind.
+        [ "$PLATFORM" = "MiyooMini" ] && freemma >/dev/null 2>&1
         ./zitch --fullscreen --low-spec --butler "$BIN_DIR/butler"
     ) >>"$LOG" 2>&1
     rm -f /tmp/stay_awake

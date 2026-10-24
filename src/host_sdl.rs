@@ -195,6 +195,10 @@ pub fn run(
     let mut app = App::new(backend, covers, &ctx, options, shot);
 
     let mut pads = Pads::new();
+    // Keypad buttons are there from the start; no controller announces them.
+    if keypad_enabled() {
+        let _ = pad_tx.connected();
+    }
     let mut event_pump = sdl
         .event_pump()
         .map_err(|e| anyhow!("SDL event pump: {e}"))?;
@@ -271,6 +275,24 @@ pub fn run(
                 Event::ControllerButtonUp { button, .. } => pads.release(button),
                 Event::ControllerAxisMotion { axis, value, .. } => {
                     if let Some(action) = pads.axis(axis, value) {
+                        let _ = pad_tx.send(action);
+                    }
+                }
+                Event::KeyDown {
+                    keycode: Some(key),
+                    repeat,
+                    ..
+                } if keypad(key).is_some() => {
+                    if !repeat
+                        && let Some(action) = keypad(key).and_then(|k| pads.key(k, true))
+                    {
+                        let _ = pad_tx.send(action);
+                    }
+                }
+                Event::KeyUp {
+                    keycode: Some(key), ..
+                } if keypad(key).is_some() => {
+                    if let Some(action) = keypad(key).and_then(|k| pads.key(k, false)) {
                         let _ = pad_tx.send(action);
                     }
                 }
@@ -411,6 +433,46 @@ pub fn run(
     app.on_close();
     painter.destroy();
     Ok(())
+}
+
+/// A handheld button that its SDL sends as a key.
+#[derive(Clone, Copy)]
+enum Keypad {
+    Button(Button),
+    Trigger(Axis),
+}
+
+fn keypad_enabled() -> bool {
+    static KEYPAD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *KEYPAD.get_or_init(|| std::env::var_os("ZITCH_KEYPAD").is_some_and(|v| v == "miyoo"))
+}
+
+/// The pad button a key stands for where the buttons arrive only as keys,
+/// as the Miyoo Mini's mmiyoo SDL2 sends them (ZITCH_KEYPAD=miyoo). SDL's
+/// buttons are by position; the face buttons are labelled the Nintendo way.
+fn keypad(key: Keycode) -> Option<Keypad> {
+    if !keypad_enabled() {
+        return None;
+    }
+    let button = match key {
+        Keycode::Up => Button::DPadUp,
+        Keycode::Down => Button::DPadDown,
+        Keycode::Left => Button::DPadLeft,
+        Keycode::Right => Button::DPadRight,
+        Keycode::Space => Button::B,
+        Keycode::LCtrl => Button::A,
+        Keycode::LShift => Button::Y,
+        Keycode::LAlt => Button::X,
+        Keycode::E => Button::LeftShoulder,
+        Keycode::T => Button::RightShoulder,
+        Keycode::RCtrl => Button::Back,
+        Keycode::Return => Button::Start,
+        Keycode::Escape => Button::Guide,
+        Keycode::Tab => return Some(Keypad::Trigger(Axis::TriggerLeft)),
+        Keycode::Backspace => return Some(Keypad::Trigger(Axis::TriggerRight)),
+        _ => return None,
+    };
+    Some(Keypad::Button(button))
 }
 
 /// Whether to drop keyboard events: where the buttons also arrive as keys
@@ -640,6 +702,18 @@ impl Pads {
             _ => return None,
         };
         button_action(pad)
+    }
+
+    /// A keypad button, pressed or let go.
+    fn key(&mut self, key: Keypad, down: bool) -> Option<Action> {
+        match key {
+            Keypad::Button(button) if down => self.press(button),
+            Keypad::Button(button) => {
+                self.release(button);
+                None
+            }
+            Keypad::Trigger(axis) => self.axis(axis, if down { i16::MAX } else { 0 }),
+        }
     }
 
     fn release(&mut self, button: Button) {

@@ -43,6 +43,7 @@ jobs:
           docker run --rm \
             -e ZITCH_VERSION=spruce-${GITHUB_SHA::7} \
             -e BUTLER_REV=$BUTLER_REV \
+            -e DEVICE=a30 \
             -e CARGO_HOME=/cache/cargo \
             -v ${{ github.workspace }}:/src \
             -v ${{ github.workspace }}/output:/output \

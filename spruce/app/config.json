@@ -5,6 +5,10 @@
   "description": "Browse, download and play itch.io games",
   "devices": [
     "MIYOO_A30",
+    "MIYOO_MINI_PLUS",
+    "MIYOO_MINI_FLIP",
+    "SPRIG_MIYOO_MINI_PLUS",
+    "SPRIG_MIYOO_MINI_FLIP",
     "MIYOO_FLIP",
     "GKD_PIXEL2",
     "TRIMUI_A133P",

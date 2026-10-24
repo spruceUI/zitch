@@ -1,0 +1,59 @@
+name: Build zitch (Miyoo Mini)
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download the A30 toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download toolchains --repo spruceUI/Cores-spruce --pattern a30_toolchain-v1.0.tar.gz --dir spruce
+
+      # The same butler commit as the arm64 build zitch ships, so both speak
+      # the protocol src/butlerd/types.rs was generated from.
+      - name: Find butler's commit
+        run: echo "BUTLER_REV=$(curl -sSf https://broth.itch.zone/butler/linux-arm64-head/LATEST)" >> "$GITHUB_ENV"
+
+      - name: Restore build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache-cargo
+            target
+          key: cargo-mini-${{ hashFiles('Cargo.lock', 'spruce/Dockerfile.a30') }}-${{ github.sha }}
+          restore-keys: cargo-mini-${{ hashFiles('Cargo.lock', 'spruce/Dockerfile.a30') }}-
+
+      - name: Build Docker image
+        run: docker build -f spruce/Dockerfile.a30 -t zitch-a30-builder spruce
+
+      - name: Build zitch
+        run: |
+          mkdir -p output cache-cargo
+          docker run --rm \
+            -e ZITCH_VERSION=spruce-${GITHUB_SHA::7} \
+            -e BUTLER_REV=$BUTLER_REV \
+            -e DEVICE=mini \
+            -e CARGO_HOME=/cache/cargo \
+            -v ${{ github.workspace }}:/src \
+            -v ${{ github.workspace }}/output:/output \
+            -v ${{ github.workspace }}/cache-cargo:/cache \
+            zitch-a30-builder
+
+      - name: Upload App folder
+        run: sudo tar -czf zitch-mini.tar.gz -C output App
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zitch-mini
+          path: zitch-mini.tar.gz
