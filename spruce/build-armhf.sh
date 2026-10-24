@@ -52,8 +52,10 @@ mkdir -p /tmp/7z
 curl -sSfL -o /tmp/7z/src.tar.xz "https://7-zip.org/a/${SEVENZIP}-src.tar.xz"
 echo "$SEVENZIP_SHA256  /tmp/7z/src.tar.xz" | sha256sum -c -
 tar -xJf /tmp/7z/src.tar.xz -C /tmp/7z
+# The sysroot's kernel headers predate the HWCAP2 bits 7-Zip probes on 32-bit ARM.
+HWCAP2="-DHWCAP2_AES=1 -DHWCAP2_PMULL=2 -DHWCAP2_SHA1=4 -DHWCAP2_SHA2=8 -DHWCAP2_CRC32=16"
 make -C /tmp/7z/CPP/7zip/Bundles/Format7zF -j"$(nproc)" -f ../../cmpl_gcc.mak \
-    CROSS_COMPILE=${CROSS}- MY_ARCH="$ARCH_FLAGS" \
+    CROSS_COMPILE=${CROSS}- MY_ARCH="$ARCH_FLAGS $HWCAP2" \
     LDFLAGS_STATIC_3="-static-libstdc++ -static-libgcc"
 cp /tmp/7z/CPP/7zip/Bundles/Format7zF/b/g/7z.so "$STAGE/"
 
