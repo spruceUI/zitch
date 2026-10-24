@@ -10,6 +10,8 @@ LOG="/mnt/SDCARD/Saves/spruce/zitch-$PLATFORM.log"
 # A game can't share the screen with zitch, so zitch writes what to run here
 # and exits; it runs below, then zitch comes back.
 HANDOFF=/tmp/zitch_next.sh
+BIN_DIR="$APP_DIR/zitch"
+[ "$PLATFORM_ARCHITECTURE" = "armhf" ] && BIN_DIR="$APP_DIR/zitch32"
 
 # zitch's environment only: the games it hands over run with spruce's.
 zitch_env() {
@@ -31,6 +33,12 @@ zitch_env() {
             ;;
         "Pixel2")
             export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"
+            ;;
+        "A30")
+            # The firmware's SDL2 turns the portrait panel into a 640x480 screen.
+            export LD_LIBRARY_PATH="/usr/miyoo/lib:$LD_LIBRARY_PATH"
+            export SDL_VIDEODRIVER=mali
+            export SDL_JOYSTICKDRIVER=a30
             ;;
         "Zero28" | "Zero40" | "XU20")
             LD_LIBRARY_PATH="$(magicx_pyui_sdl_dir):$LD_LIBRARY_PATH"
@@ -66,7 +74,7 @@ if ! (zitch_env); then
     exit 1
 fi
 
-chmod +x "$APP_DIR/zitch/zitch" "$APP_DIR/zitch/butler"
+chmod +x "$BIN_DIR/zitch" "$BIN_DIR/butler"
 
 : >"$LOG"
 
@@ -76,8 +84,8 @@ while :; do
     echo 1 > /tmp/stay_awake
     (
         zitch_env
-        cd "$APP_DIR/zitch" || exit 1
-        ./zitch --fullscreen --low-spec --butler "$APP_DIR/zitch/butler"
+        cd "$BIN_DIR" || exit 1
+        ./zitch --fullscreen --low-spec --butler "$BIN_DIR/butler"
     ) >>"$LOG" 2>&1
     rm -f /tmp/stay_awake
     [ -s "$HANDOFF" ] || break

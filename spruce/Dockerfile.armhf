@@ -1,0 +1,63 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    pkg-config \
+    git \
+    ca-certificates \
+    curl \
+    xz-utils \
+    file \
+    && rm -rf /var/lib/apt/lists/*
+
+# The A30 toolchain from Cores-spruce: GCC 13.2 on a glibc 2.23 sysroot, the
+# A30's. Its tarball lacks buildroot's wrappers and the sysroot's symlinks.
+COPY a30_toolchain-v1.0.tar.gz /tmp/
+RUN tar xzf /tmp/a30_toolchain-v1.0.tar.gz -C /opt && rm /tmp/a30_toolchain-v1.0.tar.gz
+RUN SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot && \
+    rm -f /opt/a30/bin/arm-a30-linux-gnueabihf-gcc /opt/a30/bin/arm-a30-linux-gnueabihf-g++ && \
+    printf '#!/bin/sh\nexec /opt/a30/bin/arm-a30-linux-gnueabihf-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$SYSROOT" > /opt/a30/bin/arm-a30-linux-gnueabihf-gcc && \
+    printf '#!/bin/sh\nexec /opt/a30/bin/arm-a30-linux-gnueabihf-c++.br_real --sysroot=%s "$@"\n' "$SYSROOT" > /opt/a30/bin/arm-a30-linux-gnueabihf-g++ && \
+    chmod +x /opt/a30/bin/arm-a30-linux-gnueabihf-gcc /opt/a30/bin/arm-a30-linux-gnueabihf-g++ && \
+    cd "$SYSROOT/lib" && \
+    ln -sf ld-2.23.so ld-linux-armhf.so.3 && \
+    ln -sf libc-2.23.so libc.so.6 && \
+    ln -sf libpthread-2.23.so libpthread.so.0 && \
+    ln -sf libdl-2.23.so libdl.so.2 && \
+    ln -sf libm-2.23.so libm.so.6 && \
+    ln -sf librt-2.23.so librt.so.1 && \
+    ln -sf libresolv-2.23.so libresolv.so.2
+ENV PATH=/opt/a30/bin:$PATH
+
+COPY toolchain-armhf.cmake /opt/toolchain-armhf.cmake
+
+# Only linked to; the device loads its own libSDL2-2.0.so.0.
+ARG SDL_VERSION=2.28.5
+RUN curl -sSfL https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL2-${SDL_VERSION}.tar.gz | tar xz -C /tmp && \
+    cmake -S /tmp/SDL2-${SDL_VERSION} -B /tmp/sdl-build -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain-armhf.cmake -DCMAKE_INSTALL_PREFIX=/opt/sdl2 \
+        -DSDL_STATIC=OFF -DSDL_TEST=OFF -DSDL_X11=OFF -DSDL_WAYLAND=OFF -DSDL_KMSDRM=OFF \
+        -DSDL_ALSA=OFF -DSDL_PULSEAUDIO=OFF -DSDL_PIPEWIRE=OFF -DSDL_JACK=OFF -DSDL_SNDIO=OFF \
+        -DSDL_LIBUDEV=OFF -DSDL_DBUS=OFF -DSDL_IBUS=OFF && \
+    cmake --build /tmp/sdl-build -j"$(nproc)" && \
+    cmake --install /tmp/sdl-build && \
+    rm -rf /tmp/SDL2-${SDL_VERSION} /tmp/sdl-build
+
+# butler's go.mod asks for 1.25.
+ARG GO_VERSION=1.25.3
+RUN curl -sSfL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz | tar xz -C /usr/local
+ENV PATH=/usr/local/go/bin:$PATH
+
+ENV RUSTUP_HOME=/usr/local/rustup PATH=/usr/local/cargo/bin:$PATH
+RUN curl -sSf https://sh.rustup.rs | CARGO_HOME=/usr/local/cargo sh -s -- -y \
+        --profile minimal --default-toolchain stable --target armv7-unknown-linux-gnueabihf
+
+COPY build-armhf.sh /build-armhf.sh
+RUN chmod +x /build-armhf.sh
+
+WORKDIR /src
+ENTRYPOINT ["/build-armhf.sh"]

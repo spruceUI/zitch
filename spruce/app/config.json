@@ -4,6 +4,7 @@
   "launch": "launch.sh",
   "description": "Browse, download and play itch.io games",
   "devices": [
+    "MIYOO_A30",
     "MIYOO_FLIP",
     "GKD_PIXEL2",
     "TRIMUI_A133P",
