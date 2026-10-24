@@ -1,0 +1,61 @@
+name: Build zitch (aarch64)
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure beta release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="beta-${{ github.ref_name }}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" \
+              --target "${{ github.ref_name }}" \
+              --title "Beta Build (${{ github.ref_name }})" \
+              --prerelease \
+              --notes "zitch binaries built from ${{ github.ref_name }}" \
+            || true
+
+      - name: Restore cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache-cargo
+            target
+          key: cargo-aarch64-${{ hashFiles('Cargo.lock', 'spruce/Dockerfile') }}-${{ github.sha }}
+          restore-keys: cargo-aarch64-${{ hashFiles('Cargo.lock', 'spruce/Dockerfile') }}-
+
+      - name: Build Docker image
+        run: docker build -t zitch-builder spruce
+
+      - name: Build zitch
+        run: |
+          mkdir -p output cache-cargo
+          docker run --rm \
+            -e ZITCH_VERSION=spruce-${GITHUB_SHA::7} \
+            -e CARGO_HOME=/cache/cargo \
+            -v ${{ github.workspace }}:/src \
+            -v ${{ github.workspace }}/output:/output \
+            -v ${{ github.workspace }}/cache-cargo:/cache/cargo \
+            zitch-builder
+
+      - name: Upload binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd output
+          sudo tar czf ../zitch-aarch64.tar.gz .
+          cd ..
+          gh release upload "beta-${{ github.ref_name }}" zitch-aarch64.tar.gz --clobber
