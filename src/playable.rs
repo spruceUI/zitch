@@ -500,6 +500,7 @@ fn scanned_platform_word(platform: &str) -> Option<String> {
         p if p.starts_with("rpgmaker-") => "RPG Maker",
         "pico8-cart" => "PICO-8",
         "tic80-cart" => "TIC-80",
+        "openbor-pak" => "OpenBOR",
         "swf" => "Flash",
         "jar" => "Java",
         "dos" => "DOS",

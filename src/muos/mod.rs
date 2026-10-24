@@ -22,7 +22,7 @@ pub use appimage::*;
 pub use compat::*;
 pub use firmware::*;
 pub use running::*;
-pub use spruce::{exit_requested, is_spruce, sync_roms};
+pub use spruce::{contents_in, exit_requested, extra_types, is_spruce, scan_blind, sync_roms};
 
 /// A stand-in firmware for tests: what the device has, set per thread so
 /// a test decides instead of the machine it runs on.

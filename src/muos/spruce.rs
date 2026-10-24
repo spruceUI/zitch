@@ -53,6 +53,85 @@ const SYSTEM_DIRS: [(&str, &str); 25] = [
     (TIC80, "TIC"),
 ];
 
+/// spruce systems itch.io's scan does not know: an id of our own, the Emu
+/// folder, the extensions that are theirs alone, and the itch.io tag that
+/// lists their games. OpenBOR's `.pak` is Quake's too, so only butler's
+/// scan of the file names it; see compat::runtimes.
+struct Extra {
+    id: &'static str,
+    dir: &'static str,
+    exts: &'static [&'static str],
+    tag: Option<&'static str>,
+}
+
+const EXTRAS: [Extra; 24] = [
+    extra("arduboy", "ARDUBOY", &["hex"], Some("arduboy")),
+    extra("gametank", "GAMETANK", &["gtr"], Some("gametank")),
+    extra("atarist", "ATARIST", &["msa", "stx"], Some("atari-st")),
+    extra("coco", "COCO", &["ccc"], None),
+    extra("coleco", "COLECO", &["col"], Some("colecovision")),
+    extra("cpc", "CPC", &["kcr"], Some("amstrad-cpc")),
+    extra("a800", "EIGHTHUNDRED", &["xex", "atr", "car"], None),
+    extra("a52", "FIFTYTWOHUNDRED", &["a52"], None),
+    extra("a78", "SEVENTYEIGHTHUNDRED", &["a78"], Some("atari-7800")),
+    extra("channelf", "FAIRCHILD", &["chf"], Some("channel-f")),
+    extra("intellivision", "INTELLIVISION", &["int"], Some("intellivision")),
+    extra("jaguar", "JAGUAR", &["j64", "jag"], Some("atari-jaguar")),
+    extra("pokemini", "POKE", &["min"], Some("pokemon-mini")),
+    extra("sgx", "SGFX", &["sgx"], Some("supergrafx")),
+    extra("supervision", "SUPERVISION", &["sv"], Some("supervision")),
+    extra("vb", "VB", &["vb", "vboy"], Some("virtual-boy")),
+    extra("vectrex", "VECTREX", &["vec"], Some("vectrex")),
+    extra("ws", "WS", &["ws"], Some("wonderswan")),
+    extra("wsc", "WSC", &["wsc", "pc2"], None),
+    extra("zxs", "ZXS", &["tzx", "tap", "z80", "rzx", "scl", "trd"], Some("zx-spectrum")),
+    extra("msx", "MSX", &["mx1", "mx2"], Some("msx")),
+    extra("fds", "FDS", &["fds"], None),
+    extra("gw", "GW", &["mgw"], None),
+    extra(OPENBOR, "OPENBOR", &[], None),
+];
+
+const fn extra(
+    id: &'static str,
+    dir: &'static str,
+    exts: &'static [&'static str],
+    tag: Option<&'static str>,
+) -> Extra {
+    Extra { id, dir, exts, tag }
+}
+
+pub(super) const OPENBOR: &str = "openbor";
+
+/// The extra system a file's extension says it is for.
+pub(super) fn id_for_ext(ext: &str) -> Option<&'static str> {
+    EXTRAS.iter().find(|e| e.exts.contains(&ext)).map(|e| e.id)
+}
+
+/// The extra systems spruce shows that itch.io has a tag for, as
+/// `rom:<id>`, their name and the tag's browse path.
+pub fn extra_types() -> Vec<(String, String, String)> {
+    if !is_spruce() {
+        return Vec::new();
+    }
+    EXTRAS
+        .iter()
+        .filter_map(|e| {
+            let system = System::for_id(e.id)?;
+            Some((format!("rom:{}", e.id), system.label.clone(), format!("tag-{}", e.tag?)))
+        })
+        .collect()
+}
+
+/// Whether a type is one itch.io's scan never reports, so its games
+/// cannot be filtered by their scanned platforms.
+pub fn scan_blind(type_id: &str) -> bool {
+    // itch.io has scanned few OpenBOR games so far.
+    type_id == "openbor-pak"
+        || type_id
+            .strip_prefix("rom:")
+            .is_some_and(|id| EXTRAS.iter().any(|e| e.id == id))
+}
+
 static EXIT: AtomicBool = AtomicBool::new(false);
 
 /// Whether this is spruce: its helper scripts are on the card.
@@ -80,7 +159,8 @@ struct EmuConfig {
 /// The systems whose Emu folder is on the card and shown by spruce.
 pub(super) fn systems() -> HashMap<String, System> {
     let mut systems = HashMap::new();
-    for (id, dir) in SYSTEM_DIRS {
+    let extras = EXTRAS.iter().map(|e| (e.id, e.dir));
+    for (id, dir) in SYSTEM_DIRS.into_iter().chain(extras) {
         if systems.contains_key(id) {
             continue;
         }
@@ -260,6 +340,15 @@ fn remove_copy(dest: &Path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => log::warn!("removing {}: {error}", dest.display()),
     }
+}
+
+/// What in an install folder spruce runs by its name alone, for the
+/// systems itch.io's scan does not know.
+pub fn contents_in(folder: &Path) -> Vec<Content> {
+    roms_in(folder)
+        .into_iter()
+        .filter_map(|path| Content::for_file(&path))
+        .collect()
 }
 
 /// The ROM files in an install folder, by name. Disc images need their

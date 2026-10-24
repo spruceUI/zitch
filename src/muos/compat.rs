@@ -203,6 +203,9 @@ pub fn runtimes() -> Vec<String> {
     if System::for_id(TIC80).is_some() {
         runtimes.push("tic80-cart".to_string());
     }
+    if System::for_id(spruce::OPENBOR).is_some() {
+        runtimes.push("openbor-pak".to_string());
+    }
     runtimes.extend(
         ROM_IDS
             .iter()
@@ -242,6 +245,7 @@ pub fn content_for(candidate: &Candidate, path: PathBuf) -> Result<Content, Stri
             PICO8
         }
         Flavor::TIC80Cart => TIC80,
+        Flavor::OpenBORPak if super::is_spruce() => spruce::OPENBOR,
         other => return Err(format!("no runtime for {other:?} on this device")),
     };
     if id.is_empty() {

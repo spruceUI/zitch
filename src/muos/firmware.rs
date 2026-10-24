@@ -329,6 +329,7 @@ pub(super) fn id_for_file(path: &Path) -> Option<&'static str> {
         "z64" | "n64" | "v64" => "n64",
         "p8" => PICO8,
         "tic" => TIC80,
+        _ if is_spruce() => return spruce::id_for_ext(&ext),
         _ => return None,
     })
 }

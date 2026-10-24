@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -946,6 +946,24 @@ impl Session<'_> {
                 };
                 let (target, name) = match plan_launch(client, &prompts, &cave_id, emit) {
                     Ok(Plan::Launch { target, name }) => (target, name),
+                    Ok(Plan::Direct { content, name }) => {
+                        let mut run = Run::default();
+                        let outcome = match crate::muos::launch(
+                            &name,
+                            &content,
+                            &[],
+                            &HashMap::new(),
+                            &mut run,
+                        ) {
+                            Ok(()) => Launched::Ran,
+                            Err(error) => Launched::Failed(LaunchFailure {
+                                message: format!("{error:#}"),
+                                log: Vec::new(),
+                            }),
+                        };
+                        finish(emit, outcome, Some(run));
+                        return Ok(());
+                    }
                     Ok(Plan::Cancelled) => {
                         finish(emit, Launched::Cancelled, None);
                         return Ok(());
@@ -1386,8 +1404,17 @@ enum Plan {
         target: Option<String>,
         name: String,
     },
+    /// On spruce, content butler found no target for, run by zitch.
+    Direct { content: crate::muos::Content, name: String },
     /// The user dismissed the pick between several choices.
     Cancelled,
+}
+
+/// A file name and what runs it, as a pick lists it.
+fn content_name(content: &crate::muos::Content) -> String {
+    let (crate::muos::Content::Rom { path, .. } | crate::muos::Content::Love { path }) = content;
+    let file = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_default();
+    format!("{file} ({})", content.label())
 }
 
 /// On muOS, which of the install's contents to launch: a Linux build
@@ -1452,6 +1479,28 @@ fn plan_launch(
     }
 
     let (mut choices, unrunnable) = crate::muos::launch_choices(&targets);
+    if choices.is_empty() && crate::muos::is_spruce() {
+        let folder = cave.install_info.as_ref().map(|i| i.install_folder.clone());
+        let mut found = folder
+            .map(|folder| crate::muos::contents_in(Path::new(&folder)))
+            .unwrap_or_default();
+        if !found.is_empty() {
+            let index = if found.len() == 1 {
+                0
+            } else {
+                let names: Vec<String> = found.iter().map(content_name).collect();
+                let names: Vec<&str> = names.iter().map(String::as_str).collect();
+                match prompts.pick(emit, "What do you want to launch?", "", &names) {
+                    Some(index) => index,
+                    None => return Ok(Plan::Cancelled),
+                }
+            };
+            return Ok(Plan::Direct {
+                content: found.swap_remove(index),
+                name,
+            });
+        }
+    }
     if choices.is_empty() {
         return match unrunnable.into_iter().next() {
             Some(reason) => Err(failure(reason)),

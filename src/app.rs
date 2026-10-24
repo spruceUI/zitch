@@ -1808,6 +1808,10 @@ impl App {
     }
 
     fn search_passes(&self, game: &Game) -> bool {
+        // A type itch.io never scans leaves its listing as it is.
+        if self.search.type_filter.as_deref().is_some_and(crate::muos::scan_blind) {
+            return true;
+        }
         if !self.playable_passes(game) {
             return false;
         }
@@ -1824,14 +1828,14 @@ impl App {
 
     /// Asks which playable type the Search tab shows.
     fn open_search_type(&mut self) {
-        let types = crate::playable::playable_types();
+        let types = search_types();
         let mut choices = vec!["All types".to_string()];
-        choices.extend(types.iter().map(|t| t.label.clone()));
+        choices.extend(types.iter().map(|(_, label)| label.clone()));
         let focus = self
             .search
             .type_filter
             .as_ref()
-            .and_then(|id| types.iter().position(|t| t.id == *id))
+            .and_then(|id| types.iter().position(|(t, _)| t == id))
             .map_or(0, |index| index + 1);
         let prompt = Prompt {
             id: 0,
@@ -1849,7 +1853,7 @@ impl App {
             self.prompt_queue.push_front(open);
         }
         self.prompt_options = std::iter::once(Action::SetSearchType(None))
-            .chain(types.iter().map(|t| Action::SetSearchType(Some(t.id.clone()))))
+            .chain(types.into_iter().map(|(id, _)| Action::SetSearchType(Some(id))))
             .collect();
     }
 
@@ -4215,14 +4219,28 @@ fn reported<'a>(
     Some((saved, current))
 }
 
+/// The types the Search tab offers, by id and name: the device's
+/// playable types, then on spruce its systems itch.io's scan does not know.
+fn search_types() -> Vec<(String, String)> {
+    let playable = crate::playable::playable_types()
+        .iter()
+        .map(|t| (t.id.clone(), t.label.clone()));
+    let extra = crate::muos::extra_types().into_iter().map(|(id, label, _)| (id, label));
+    playable.chain(extra).collect()
+}
+
 /// A playable type's name and the itch.io listing that browses it.
 fn browse_listing(id: &str) -> (String, String) {
+    if let Some((_, label, path)) = crate::muos::extra_types().into_iter().find(|t| t.0 == id) {
+        return (label, path);
+    }
     let label = crate::playable::playable_types()
         .iter()
         .find(|t| t.id == id)
         .map_or_else(|| id.to_string(), |t| t.label.clone());
     let tag = match id {
         "love" => return (label, "made-with-love2d".to_string()),
+        "openbor-pak" => "openbor",
         "linux-arm64-handheld" => return (label, "platform-linux".to_string()),
         "pico8-cart" => "pico-8",
         "tic80-cart" => "tic-80",
