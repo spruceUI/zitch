@@ -54,6 +54,8 @@ pub(super) struct Love {
 pub(super) const SDL_SHIM: &str = "libzitch-sdl.so";
 /// Next to the executable: gl4es as the libGL a Linux build asks for.
 pub(super) const GL4ES_DIR: &str = "gl4es";
+/// Why a Linux build is not run on spruce, after the build's name.
+const SPRUCE_LINUX: &str = "is a Linux build; on spruce those come through PortMaster";
 
 /// Something in an install folder the firmware can run.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,8 +108,7 @@ pub(super) fn love() -> Option<&'static Love> {
     if let Some(fake) = super::fake::firmware() {
         return fake.love;
     }
-    // On spruce LÖVE games are left to PortMaster, which ports them one at
-    // a time.
+    // On spruce LÖVE games are left to PortMaster, like Linux builds.
     if super::is_spruce() {
         return None;
     }
@@ -323,6 +324,10 @@ pub fn launch_choices(targets: &[LaunchTarget]) -> (Vec<LaunchChoice>, Vec<Strin
                 if is_appimage(Path::new(&path)) {
                     continue;
                 }
+                if super::is_spruce() {
+                    unrunnable.push(format!("{} {SPRUCE_LINUX}", file_name(&path)));
+                    continue;
+                }
                 let unpacked = unpacked_from(Path::new(&path));
                 let blocked = candidate.linux_info.as_ref().and_then(native_blocker);
                 match (unpacked, blocked) {
@@ -436,6 +441,9 @@ pub struct ScannedTarget {
 /// Whether a scanned target would run once installed, by the checks
 /// launching it makes, except that a LÖVE game must say its version.
 pub fn scanned_target_runs_here(target: &ScannedTarget) -> bool {
+    if super::is_spruce() && target.flavor == Flavor::NativeLinux {
+        return false;
+    }
     scanned_target_fits(target, glibc_version())
 }
 

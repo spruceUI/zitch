@@ -76,7 +76,7 @@ pub fn device_platforms() -> &'static [String] {
     static PLATFORMS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     PLATFORMS.get_or_init(|| {
         let mut platforms = crate::muos::runtimes();
-        // On spruce a Linux build cannot have the screen yet; see muos::spruce.
+        // On spruce Linux builds are left to PortMaster.
         if !crate::muos::is_spruce() {
             platforms.push("linux-arm64-handheld".to_string());
         }
@@ -197,8 +197,13 @@ pub fn upload_runs_here(upload: &Upload, scans_decide: bool) -> bool {
         // butler has unpacked it. One tagged for another OS is not worth
         // the download, one with no tags (how ROM and .love zips arrive)
         // is.
-        let foreign = (upload.platforms.windows.is_some() || upload.platforms.osx.is_some())
-            && upload.platforms.linux.is_none();
+        let other_os = upload.platforms.windows.is_some() || upload.platforms.osx.is_some();
+        // On spruce a Linux build is left to PortMaster too.
+        let foreign = if crate::muos::is_spruce() {
+            other_os || upload.platforms.linux.is_some()
+        } else {
+            other_os && upload.platforms.linux.is_none()
+        };
         crate::muos::runs_here(path) || (is_archive(path) && !foreign)
     } else {
         runs_here(&upload.platforms)
