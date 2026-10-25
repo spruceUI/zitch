@@ -112,7 +112,17 @@ while :; do
     rm -f /tmp/stay_awake
     [ -s "$HANDOFF" ] || break
     log_message "zitch: running $(cat "$HANDOFF")"
-    sh "$HANDOFF"
+    case "$PLATFORM" in
+        "MiyooMini")
+            # As PyUI starts a game: libpadsp takes its sound to audioserver.
+            preload=/mnt/SDCARD/miyoo/lib/libpadsp.so
+            [ -f "$preload" ] || preload=/customer/lib/libpadsp.so
+            LD_PRELOAD="$preload" sh "$HANDOFF"
+            ;;
+        *)
+            sh "$HANDOFF"
+            ;;
+    esac
 done
 
 rm -f "$HANDOFF"
