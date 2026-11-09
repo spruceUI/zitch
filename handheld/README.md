@@ -2,7 +2,7 @@
 
 muOS is the first firmware zitch supports: the RG35XX H, RG40XX H and
 TrimUI Brick Pro, on Jacaranda and Andromeda. Everything below is about
-muOS.
+muOS until the spruceOS section at the end.
 
 muOS has no X11 or Wayland, so zitch is built with the SDL2 host
 (`--no-default-features --features sdl-host`, `src/host_sdl.rs`) and linked
@@ -130,7 +130,7 @@ judges an upload by its file name instead of itch's platform tags, and
 takes an archive with no platform tags too, since that is how most
 uploads arrive; butler unpacks it, and Play asks butler's
 `Launch.GetTargets` what it holds, naming the runtimes the firmware has
-(`muos::runtimes`). A ROM, cart or LÖVE payload comes back as a
+(`handheld::runtimes`). A ROM, cart or LÖVE payload comes back as a
 `runtime` target with dash's engine record, an arm64 build as a
 `native` one. Every runnable choice is offered together, Linux builds
 first: the developer's own build is the real engine where the
@@ -139,7 +139,7 @@ export is the official player, fake-08 rejects newer cart syntax).
 One choice launches at once; more and the user picks. The pick goes to
 butler's `Launch` as the target. A payload comes back in a
 `RuntimeLaunch` request, which zitch answers by running it
-(`src/muos/`) and replying when it exits; a Linux build butler
+(`src/handheld/`) and replying when it exits; a Linux build butler
 launches itself, through the SDL shim. butler tracks the run either
 way, so play time and the itch.io session are recorded. From Play to
 the game's exit the screen is the game's: a "Launching" curtain covers
@@ -147,7 +147,7 @@ the interface while butler sets the run up (B cancels), then the window
 hides and takes no input until the game is gone. Quitting is the game's
 or the firmware's job. A Linux build's
 deep-probe record is checked before it is offered
-(`muos::native_blocker`): a 32-bit ARM or x86 build, a bundled SDL2
+(`handheld::native_blocker`): a 32-bit ARM or x86 build, a bundled SDL2
 without the dynamic API, SDL3, a GLFW or X11 build, or a glibc newer
 than the firmware's is left out with the reason, which becomes the
 failure when nothing else can run. Every game gets an Install button.
@@ -194,7 +194,7 @@ mapping helper) and quit with their own quit or the panic combo.
 ### Linux builds
 
 Native arm64 builds go through butler's launcher as on a desktop, with
-two additions to their environment (`muos::game_env`):
+two additions to their environment (`handheld::game_env`):
 
 - `SDL_DYNAMIC_API` naming `libzitch-sdl.so`, built from
   `handheld/sdl-dynapi.c` by `make handheld` and deployed next to the
@@ -205,7 +205,7 @@ two additions to their environment (`muos::game_env`):
 An AppImage (Cro-Mag Rally, https://jorio.itch.io/cromagrally) mounts
 itself with FUSE 2, which the firmware lacks. Before the choices are
 made, Play unpacks each one next to itself with its own
-`--appimage-extract` into `<name>.AppImage.d` (`muos::unpack`, once
+`--appimage-extract` into `<name>.AppImage.d` (`handheld::unpack`, once
 per image version, by timestamp) and asks butler for the targets
 again with `unpackedAppImages` set (on both `Launch.GetTargets` and
 `Launch`), which makes dash drop an image whose
@@ -287,7 +287,7 @@ its itch.io URL, when adding another.
   Two more things found with it, both in zitch rather than the shim:
   muOS starts apps with `LD_PRELOAD=libmucursor.so`, whose `SDL_Init`
   override returns -1 for an SDL it cannot see past, which is any SDL
-  in a bundled shared library, so `muos::game_env` clears it; and its
+  in a bundled shared library, so `handheld::game_env` clears it; and its
   `LD_LIBRARY_PATH` carries the firmware's crashing gl4es and the
   frontend's libraries, which are dropped too.
 - Labyrinth of Legendary Loot
@@ -298,7 +298,7 @@ its itch.io URL, when adding another.
   the three `SDL_Create*Cursor` entries with a stand-in when SDL has
   none; `SDL_SetCursor` and `SDL_FreeCursor` skip a cursor that is not
   theirs. There is no mouse to show one anyway. For this to reach a
-  LÖVE game, `launch_love` now applies `muos::game_env` like butler's
+  LÖVE game, `launch_love` now applies `handheld::game_env` like butler's
   launches do, so LÖVE runs under the shim and without the frontend's
   preload, with `LOVE_GRAPHICS_USE_OPENGLES=1` so it asks for ES
   outright instead of probing core and 2.1 first.
@@ -312,6 +312,12 @@ its itch.io URL, when adding another.
   the shim starts it from its `SDL_GL_CreateContext` wrapper: hands it
   the firmware's `SDL_GL_GetProcAddress` and drawable size, then
   `initialize_gl4es`. `LIBGL_ES=2` is set unless the game sets it.
+- Air Delivery (https://pianoman373.itch.io/air-delivery), a PICO-8
+  export for the Raspberry Pi: its `SDL_Init` asks for every subsystem,
+  and spruce's libSDL2 is built without sensors, so the init fails with
+  "SDL not built with sensor support" and the game exits before it
+  draws. The shim wraps `SDL_Init` and `SDL_InitSubSystem`: an init
+  that fails is retried without the sensor and haptic subsystems.
 
 `ZITCH_SDL_TRACE=1` in the game's environment logs every GL lookup and
 prints a backtrace on a crash. A GL function the game uses and ES lacks
@@ -344,3 +350,79 @@ python3 -c "from PIL import Image; Image.frombytes('RGBA',(640,480),open('fb.raw
   come through as axes.
 - `SETUP_APP` (in `/opt/muos/script/var/func.sh`) sets HOME and
   XDG_CONFIG_HOME to /root. `mux_launch.sh` overrides them after.
+
+## spruceOS
+
+Tested on the TrimUI Brick Pro. spruce overlays glibc 2.38 and its own
+SDL2 2.30 (TrimUI's build, `mali` video driver, dynamic API on) onto the
+stock TinaLinux rootfs, so the muOS binary runs as is: the same `make
+handheld` build against the same sysroot.
+
+A spruce app is a folder under `/mnt/SDCARD/App/` with a `config.json`
+(label, icon, launch script, description, the device names it is listed
+on) and `launch.sh`. Picking it in the menu (PyUI) writes
+`/tmp/cmd_to_run.sh` holding `cd <folder>; ./launch.sh`, and the menu
+exits; spruce's `principal.sh` runs the file with its output discarded
+and brings the menu back when it returns. `handheld/spruce/` holds ours.
+`launch.sh` sources `spruce/scripts/appEnv.sh`, the environment spruce
+promises third-party apps (`CFW=SPRUCE`, `SPRUCE_PLATFORM`,
+`SSL_CERT_FILE`), keeps config (the login, butler's database, installed
+games) and the cover cache under `Saves/zitch` on the card, which an
+update of the app folder leaves alone, reads extra flags from an `args`
+file, and logs to `zitch.log` there. The icon is a 70x70 PNG in the
+folder, drawn in the
+SPRUCE theme's gold; a theme can override it under `icons/app/`. The
+script also exports a pad map that names the buttons by label: TrimUI's
+`trimui_inputd` shows the pad as an Xbox 360 controller laid out by
+position, so without one SDL's A is the button labelled B. Other boards
+get spruce's own map through `export_sdl_gamecontroller_map`.
+
+```
+make spruce-deploy HANDHELD=brick-pro   # copy the stage + launch.sh + config.json + icon into App/zitch
+make spruce-shot HANDHELD=brick-pro     # deploy, launch from the menu, fetch /tmp/zitch-spruce.png
+make spruce-app                         # package as target/zitch-spruce.zip, to unzip into App/
+```
+
+`HANDHELD` is an ssh host; spruce's dropbear logs in as root.
+
+In the code, `src/handheld/` holds what every firmware shares and a
+`Firmware` trait for what differs, one module per firmware:
+`muos.rs` (its launch script runs ROMs, the panic combo reads a process
+name, the Archive Manager installs updates) and `spruce.rs` (its
+emulator folders list the systems, one script runs ROMs).
+`handheld::firmware()` detects which this is: muOS by its launch script,
+spruce by `CFW=SPRUCE` in the environment (what `appEnv.sh` sets, so
+running zitch over ssh needs that sourced first). A new firmware is a
+new module with a `detect()` and an `impl Firmware`. LÖVE games and Linux
+builds through the SDL shim and gl4es run on both.
+
+spruce's emulators are folders under `Emu/` on the card (`GB`, `SFC`,
+`PS`, ...), each with a `config.json` naming the cores it offers and
+the default; `spruce.rs` maps dash's ids to those folders and reads the
+label and the chosen core from each that exists. Every folder names the
+same launcher, `spruce/scripts/emu/standard_launch.sh`, which takes the
+ROM path as its argument and the system from the `Emu/<NAME>/` in its
+own path, so zitch runs it as `Emu/<NAME>/../../spruce/scripts/emu/
+standard_launch.sh "<rom>"`, as the menu does, with HOME set to
+`/mnt/SDCARD` as spruce's launches have it. The ROM stays in zitch's
+install folder. The script picks the user's core, sets the governor,
+runs RetroArch (or the standalone emulator) with spruce's config and
+pad map, and returns when it exits. zitch's own pad map stays out of
+the emulator's environment. The core it reports is the one the script
+will pick: the board's own `Emulator_<PLATFORM>` choice, then the
+`Emulator*` option whose device list names this device (the names come
+through `SPRUCE_DEVICE_NAMES`, which `launch.sh` exports), then
+`Emulator_64`, then `Emulator`, then the folder's default. PICO-8 carts
+go to `Emu/PICO8` when the user has put the official `pico8_64` and
+`pico8.dat` in `BIOS/`, else to the Fake-08 core in `Emu/FAKE08`.
+Quitting a ROM from zitch ends the emulator and leaves the launch
+script to its housekeeping, on both firmwares. A process still up three
+seconds after SIGTERM is killed, as muOS's own quit does; its muxretro
+takes no notice of SIGTERM.
+
+Device notes, Brick Pro: kernel 4.9, PowerVR GE8300 with GLES through
+`/usr/lib/libEGL.so` and `/dev/dri` present, 1024x768 32bpp `/dev/fb0`
+(stride 4096), one virtual pad `TRIMUI Player1` on `js0` from spruce's
+`trimui_inputd`, PortMaster preinstalled under
+`/mnt/SDCARD/Persistent/portmaster` with ports in `/mnt/SDCARD/Roms/ports`.
+`/usr/trimui/bin/fbscreencap` dumps the panel.
